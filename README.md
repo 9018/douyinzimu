@@ -60,16 +60,33 @@
 ### Web 服务（Docker / 全平台）
 
 ```bash
-# Docker（推荐）
-docker compose up -d
+# 1) 可选：准备 .env（没有可先跳过）
+cp .env.example .env 2>/dev/null || true
 
-# 或手动启动
-uv sync 
-cd frontend && pnpm install && pnpm build && cd ..
-python -m backend.server
+# 2) 启动容器
+docker compose up -d --build
+
+# 3) 查看日志
+docker compose logs -f douyin
 ```
 
 浏览器访问 `http://localhost:8000`
+
+#### Docker 映射说明（已在 compose.yaml 内置）
+
+- `./backend -> /app/backend`：后端源码映射到宿主机
+- `./frontend -> /app/frontend`：前端源码映射到宿主机
+- `./config -> /app/config`：配置文件映射到宿主机
+- `./download -> /app/download`：下载产物映射到宿主机
+
+> 首次启动如果检测到 `frontend/dist` 不存在，会在容器中自动执行 `pnpm build`。
+
+# 或手动启动（非 Docker）
+```bash
+uv sync
+cd frontend && pnpm install && pnpm build && cd ..
+python -m backend.server
+```
 
 ### 命令行（cli模式）
 

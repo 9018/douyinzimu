@@ -8,6 +8,8 @@ import glob
 import mimetypes
 import os
 import platform
+import shlex
+import shutil
 import subprocess
 from typing import Any, Dict, Optional
 
@@ -23,6 +25,8 @@ router = APIRouter(prefix="/api/file", tags=["文件操作"])
 
 # 允许的媒体文件扩展名
 ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm", ".jpg", ".jpeg", ".png", ".gif", ".webp"}
+ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+
 
 
 # ============================================================================
@@ -72,6 +76,54 @@ class FindLocalFileResponse(BaseModel):
     found: bool
     video_path: Optional[str] = None
     images: Optional[list[str]] = None
+
+
+class VideoFileItem(BaseModel):
+    """视频文件条目"""
+
+    path: str
+    name: str
+    size: int
+    mtime: int
+
+
+class ListVideosResponse(BaseModel):
+    """视频列表响应"""
+
+    files: list[VideoFileItem]
+
+
+class TransformVideoRequest(BaseModel):
+    """视频转码请求"""
+
+    file_path: str
+    ffmpeg_args: str = ""
+
+
+class TransformVideoResponse(BaseModel):
+    """视频转码响应"""
+
+    success: bool
+    output_path: Optional[str] = None
+    error: Optional[str] = None
+
+
+
+
+def _get_download_dir() -> str:
+    return os.path.abspath(settings.get("downloadPath", DOWNLOAD_DIR))
+
+
+def _is_safe_path(download_dir: str, path: str) -> bool:
+    abs_path = os.path.abspath(path)
+    return abs_path.startswith(download_dir)
+
+
+def _build_transformed_filename(file_name: str) -> str:
+    base, ext = os.path.splitext(file_name)
+    return f"{base}_tr{ext or '.mp4'}"
+
+
 
 
 # ============================================================================
@@ -239,6 +291,105 @@ def find_local_file(work_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"查找本地文件失败: {e}")
         return {"found": False, "video_path": None, "images": None}
+
+
+@router.get("/videos", response_model=ListVideosResponse)
+def list_downloaded_videos() -> Dict[str, list[Dict[str, Any]]]:
+    """
+    获取下载目录中的视频文件列表（递归）。
+    """
+    try:
+        download_dir = _get_download_dir()
+        if not os.path.exists(download_dir):
+            return {"files": []}
+
+        files: list[Dict[str, Any]] = []
+        for root, _, names in os.walk(download_dir):
+            for name in names:
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in ALLOWED_VIDEO_EXTENSIONS:
+                    continue
+
+                abs_path = os.path.join(root, name)
+                stat = os.stat(abs_path)
+                files.append(
+                    {
+                        "path": os.path.relpath(abs_path, download_dir),
+                        "name": name,
+                        "size": stat.st_size,
+                        "mtime": int(stat.st_mtime),
+                    }
+                )
+
+        files.sort(key=lambda item: item["mtime"], reverse=True)
+        return {"files": files}
+
+    except Exception as e:
+        logger.error(f"获取视频列表失败: {e}")
+        raise HTTPException(status_code=500, detail="获取视频列表失败")
+
+
+@router.post("/transform", response_model=TransformVideoResponse)
+def transform_video(request: TransformVideoRequest) -> Dict[str, Any]:
+    """
+    使用 ffmpeg 对已下载视频做转码处理。
+
+    ffmpeg_args 为附加参数，不需要包含 -i 和输出文件。
+    """
+    download_dir = _get_download_dir()
+    input_path = os.path.abspath(os.path.join(download_dir, request.file_path))
+
+    if not _is_safe_path(download_dir, input_path):
+        raise HTTPException(status_code=400, detail="文件路径不安全")
+
+    if not os.path.exists(input_path) or not os.path.isfile(input_path):
+        raise HTTPException(status_code=404, detail="视频文件不存在")
+
+    ext = os.path.splitext(input_path)[1].lower()
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="不支持的视频格式")
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise HTTPException(status_code=500, detail="未检测到 ffmpeg，请先安装并加入 PATH")
+
+    output_name = _build_transformed_filename(os.path.basename(input_path))
+    output_path = os.path.join(os.path.dirname(input_path), output_name)
+
+    try:
+        extra_args = shlex.split(request.ffmpeg_args.strip()) if request.ffmpeg_args else []
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"ffmpeg 参数格式错误: {e}")
+
+    for arg in extra_args:
+        if arg == "-i":
+            raise HTTPException(status_code=400, detail="ffmpeg 参数中不允许包含 -i")
+
+    command = [ffmpeg_path, "-i", input_path, *extra_args, "-y", output_path]
+    logger.info(f"开始视频转码: {' '.join(command)}")
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or "ffmpeg 执行失败"
+            logger.error(f"视频转码失败: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        rel_path = os.path.relpath(output_path, download_dir)
+        logger.info(f"✓ 视频转码完成: {rel_path}")
+        return {"success": True, "output_path": rel_path, "error": None}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"视频转码异常: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/media/{file_path:path}")

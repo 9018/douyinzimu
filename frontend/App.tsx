@@ -9,6 +9,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { ToastContainer, toast } from './components/Toast';
 import { WelcomeWizard } from './components/WelcomeWizard';
+import { VideoTransformPanel } from './components/VideoTransformPanel';
 import { WorkCard } from './components/WorkCard';
 import { useAria2Download } from './hooks/useAria2Download';
 import { bridge } from './services/bridge';
@@ -208,7 +209,7 @@ export const App: React.FC = () => {
     if (newTab !== activeTab) {
       setActiveTab(newTab);
       // 只有非下载管理页面才清空输入框
-      if (newTab !== TaskType.DOWNLOAD_MANAGER) {
+      if (newTab !== TaskType.DOWNLOAD_MANAGER && newTab !== TaskType.VIDEO_TRANSFORM) {
         setInputVal('');
       }
       logger.info(`手动切换任务模式: ${newTab}`);
@@ -549,12 +550,16 @@ export const App: React.FC = () => {
           <LightErrorBoundary fallbackMessage="下载面板加载失败">
             <DownloadPanel isOpen={true} showLogs={showLogs} />
           </LightErrorBoundary>
+        ) : activeTab === TaskType.VIDEO_TRANSFORM ? (
+          <LightErrorBoundary fallbackMessage="视频转码面板加载失败">
+            <VideoTransformPanel />
+          </LightErrorBoundary>
         ) : (
           <main className="flex-1 flex flex-col min-w-0 relative">
             {/* Sticky Header */}
             <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200/60 shadow-sm transition-all">
               <div className="max-w-7xl mx-auto w-full px-8 py-5">
-                {(activeTab as TaskType) !== TaskType.DOWNLOAD_MANAGER && (
+                {(activeTab as TaskType) !== TaskType.DOWNLOAD_MANAGER && (activeTab as TaskType) !== TaskType.VIDEO_TRANSFORM && (
                   <>
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 tracking-tight">
                       {activeTab === TaskType.SEARCH && <Search size={24} className="text-blue-500" />}

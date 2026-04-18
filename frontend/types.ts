@@ -11,6 +11,7 @@ export enum TaskType {
   FOLLOWING = 'following',   // 用户关注
   FOLLOWER = 'follower',     // 用户粉丝
   DOWNLOAD_MANAGER = 'download_manager', // 下载管理
+  VIDEO_TRANSFORM = 'video_transform', // 视频转码
 }
 
 export interface DouyinWork {

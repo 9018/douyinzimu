@@ -73,6 +73,19 @@ export interface Aria2Config {
   secret: string;
 }
 
+export interface VideoFileItem {
+  path: string;
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+export interface TransformVideoResult {
+  success: boolean;
+  output_path: string | null;
+  error: string | null;
+}
+
 // ============================================================================
 // 核心请求函数
 // ============================================================================
@@ -253,6 +266,19 @@ export const api = {
       get<{ found: boolean; video_path: string | null; images: string[] | null }>(
         `/api/file/find-local/${encodeURIComponent(workId)}`
       ),
+
+    /** 获取下载目录内视频文件 */
+    listVideos: async () => {
+      const result = await get<{ files: VideoFileItem[] }>('/api/file/videos');
+      return result.files;
+    },
+
+    /** 视频转码 */
+    transformVideo: (filePath: string, ffmpegArgs: string) =>
+      post<TransformVideoResult>('/api/file/transform', {
+        file_path: filePath,
+        ffmpeg_args: ffmpegArgs,
+      }),
 
     /** 获取媒体文件 URL */
     getMediaUrl: (filePath: string) => {

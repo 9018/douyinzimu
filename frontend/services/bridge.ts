@@ -4,6 +4,7 @@
  */
 
 import { AppSettings, TaskType } from '../types';
+import { TransformVideoResult, VideoFileItem } from './api';
 import { handleError } from '../utils/errorHandler';
 import { logger } from './logger';
 import { sseClient } from './sseClient';
@@ -53,6 +54,8 @@ export interface Bridge {
   cookieLogin: () => Promise<{ success: boolean; cookie: string; user_agent: string; error: string }>;
   findLocalFile: (workId: string) => Promise<{ found: boolean; video_path: string | null; images: string[] | null }>;
   getMediaUrl: (filePath: string) => string;
+  listVideoFiles: () => Promise<VideoFileItem[]>;
+  transformVideo: (filePath: string, ffmpegArgs: string) => Promise<TransformVideoResult>;
 }
 
 export const bridge: Bridge = {
@@ -222,6 +225,24 @@ export const bridge: Bridge = {
   },
 
   getMediaUrl: (filePath) => api.file.getMediaUrl(filePath),
+
+  listVideoFiles: async () => {
+    try {
+      return await api.file.listVideos();
+    } catch (error) {
+      handleError(error, {}, { customMessage: 'list videos failed' });
+      throw error;
+    }
+  },
+
+  transformVideo: async (filePath, ffmpegArgs) => {
+    try {
+      return await api.file.transformVideo(filePath, ffmpegArgs);
+    } catch (error) {
+      handleError(error, { filePath, ffmpegArgs }, { customMessage: 'transform video failed' });
+      throw error;
+    }
+  },
 };
 
 export default bridge;

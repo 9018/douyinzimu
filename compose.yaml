@@ -1,15 +1,36 @@
 services:
   douyin:
-    build: 
+    container_name: douyin-crawler
+    build:
       context: .
       args:
-        # 前端通过该base url访问后端
-        - VITE_API_BASE_URL=http://localhost
+        VITE_API_BASE_URL: http://localhost:8000
     ports:
-      - "80:8000"
-    container_name: douyin-crawler
+      - "8000:8000"
     environment:
       DOUYIN_HOST: 0.0.0.0
-    # DOUYIN_COOKIE 期望被写在 .env 中
+      DOUYIN_PORT: 8000
+      PYTHONUNBUFFERED: "1"
     env_file:
       - .env
+    volumes:
+      # 后端源码映射（便于直接在宿主机修改）
+      - ./backend:/app/backend
+      # 前端源码映射（便于直接在宿主机修改）
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+      # 配置和下载数据映射到宿主机
+      - ./config:/app/config
+      - ./download:/app/download
+    command: >
+      bash -lc '
+      if [ ! -f /app/frontend/dist/index.html ]; then
+        echo "[docker] frontend/dist 不存在，开始构建前端...";
+        cd /app/frontend && pnpm install --frozen-lockfile && pnpm build;
+      fi;
+      cd /app && python -m backend.server --host 0.0.0.0 --port 8000
+      '
+    restart: unless-stopped
+
+volumes:
+  frontend_node_modules:
