@@ -1,0 +1,35 @@
+services:
+  douyin:
+    container_name: douyin-crawler-dev
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "8000:8000"
+    environment:
+      DOUYIN_HOST: 0.0.0.0
+      DOUYIN_PORT: 8000
+      PYTHONUNBUFFERED: "1"
+    env_file:
+      - .env
+    volumes:
+      # 前后端源码映射（开发模式）
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+      # 配置与下载目录映射
+      - ./config:/app/config
+      - ./download:/app/download
+    command: >
+      bash -lc '
+      if [ ! -f /app/frontend/dist/index.html ]; then
+        echo "[docker-dev] frontend/dist 不存在，开始构建前端...";
+        cd /app/frontend && pnpm install --frozen-lockfile && pnpm build;
+      fi;
+      cd /app && python -m backend.server --host 0.0.0.0 --port 8000
+      '
+    restart: unless-stopped
+
+volumes:
+  frontend_node_modules:

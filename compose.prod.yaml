@@ -1,5 +1,3 @@
-# 默认使用生产配置（适合直接部署）
-# 开发模式请使用: docker compose -f compose.dev.yaml up -d --build
 services:
   douyin:
     container_name: douyin-crawler
@@ -16,6 +14,7 @@ services:
     env_file:
       - .env
     volumes:
+      # 生产环境仅映射数据目录
       - ./config:/app/config
       - ./download:/app/download
     restart: unless-stopped

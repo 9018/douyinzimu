@@ -63,7 +63,7 @@
 # 1) 可选：准备 .env（没有可先跳过）
 cp .env.example .env 2>/dev/null || true
 
-# 2) 启动容器
+# 2) 生产模式（默认 compose.yaml）
 docker compose up -d --build
 
 # 3) 查看日志
@@ -72,14 +72,32 @@ docker compose logs -f douyin
 
 浏览器访问 `http://localhost:8000`
 
-#### Docker 映射说明（已在 compose.yaml 内置）
+#### Docker 双配置
 
-- `./backend -> /app/backend`：后端源码映射到宿主机
-- `./frontend -> /app/frontend`：前端源码映射到宿主机
-- `./config -> /app/config`：配置文件映射到宿主机
-- `./download -> /app/download`：下载产物映射到宿主机
+- `compose.yaml` / `compose.prod.yaml`：生产模式（仅映射配置和下载目录）
+- `compose.dev.yaml`：开发模式（映射前后端源码 + 配置 + 下载目录）
 
-> 首次启动如果检测到 `frontend/dist` 不存在，会在容器中自动执行 `pnpm build`。
+```bash
+# 开发模式（源码热修改）
+docker compose -f compose.dev.yaml up -d --build
+
+# 生产模式（显式指定）
+docker compose -f compose.prod.yaml up -d --build
+```
+
+#### 目录映射说明
+
+**开发模式（compose.dev.yaml）**
+- `./backend -> /app/backend`
+- `./frontend -> /app/frontend`
+- `./config -> /app/config`
+- `./download -> /app/download`
+
+> 开发模式首次启动如果检测到 `frontend/dist` 不存在，会在容器中自动执行 `pnpm build`。
+
+**生产模式（compose.yaml / compose.prod.yaml）**
+- `./config -> /app/config`
+- `./download -> /app/download`
 
 # 或手动启动（非 Docker）
 ```bash
