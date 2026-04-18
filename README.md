@@ -72,6 +72,11 @@ docker compose logs -f douyin
 
 浏览器访问 `http://localhost:8000`
 
+
+> 容器启动时会先自动执行：
+> `aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all --dir=/app/download -D`
+> 然后再启动后端服务。
+
 #### Docker 双配置
 
 - `compose.yaml` / `compose.prod.yaml`：生产模式（仅映射配置和下载目录）

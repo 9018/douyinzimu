@@ -12,10 +12,20 @@ services:
     environment:
       DOUYIN_HOST: 0.0.0.0
       DOUYIN_PORT: 8000
+      DOUYIN_ARIA2_SECRET: douyin_crawler_default_secret
       PYTHONUNBUFFERED: "1"
     env_file:
       - .env
     volumes:
       - ./config:/app/config
       - ./download:/app/download
+    command: >
+      bash -lc '
+      mkdir -p /app/download;
+      ARIA2_SECRET="${DOUYIN_ARIA2_SECRET:-douyin_crawler_default_secret}";
+      aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all \
+             --rpc-secret="${ARIA2_SECRET}" --rpc-listen-port=6800 \
+             --dir=/app/download -D;
+      cd /app && python -m backend.server --host 0.0.0.0 --port 8000
+      '
     restart: unless-stopped

@@ -10,6 +10,7 @@ services:
     environment:
       DOUYIN_HOST: 0.0.0.0
       DOUYIN_PORT: 8000
+      DOUYIN_ARIA2_SECRET: douyin_crawler_default_secret
       PYTHONUNBUFFERED: "1"
     env_file:
       - .env
@@ -23,6 +24,11 @@ services:
       - ./download:/app/download
     command: >
       bash -lc '
+      mkdir -p /app/download;
+      ARIA2_SECRET="${DOUYIN_ARIA2_SECRET:-douyin_crawler_default_secret}";
+      aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all \
+             --rpc-secret="${ARIA2_SECRET}" --rpc-listen-port=6800 \
+             --dir=/app/download -D;
       if [ ! -f /app/frontend/dist/index.html ]; then
         echo "[docker-dev] frontend/dist 不存在，开始构建前端...";
         cd /app/frontend && pnpm install --frozen-lockfile && pnpm build;

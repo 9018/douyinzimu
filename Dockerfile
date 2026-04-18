@@ -20,9 +20,24 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# 安装运行依赖（ffmpeg 用于视频转码）
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+# 切换 apt 镜像源（中国大陆环境加速）
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources; \
+    fi
+
+# 安装构建依赖 + aria2 + ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    pkg-config \
+    libcairo2-dev \
+    libgirepository1.0-dev \
+    libgtk-3-dev \
+    libwebkit2gtk-4.1-dev \
+    libglib2.0-dev \
+    aria2 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 pnpm（用于挂载前端源码时在容器内构建 dist）
