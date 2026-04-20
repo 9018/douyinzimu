@@ -50,6 +50,18 @@ DEFAULT_SETTINGS = {
     "aria2Host": ARIA2_DEFAULTS["HOST"],
     "aria2Port": ARIA2_DEFAULTS["PORT"],
     "aria2Secret": ARIA2_DEFAULTS["SECRET"],
+    "webdavEnabled": False,
+    "webdavUrl": "",
+    "webdavUsername": "",
+    "webdavPassword": "",
+    "webdavBasePath": "OS/docker",
+    "webdavUploadDownloads": False,
+    "webdavUploadTransformed": False,
+    "subtitleLanguage": "",
+    "subtitlePrompt": "",
+    "subtitleLocalWhisperUrl": "http://host.docker.internal:9001",
+    "subtitleLocalModel": "medium",
+    "subtitleWordTimestamps": True,
 }
 
 # 窗口最小尺寸

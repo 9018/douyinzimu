@@ -11,8 +11,6 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
-from ..lib.cookie_login import get_cookie_by_login
-
 router = APIRouter(prefix="/api/system", tags=["系统工具"])
 
 
@@ -113,6 +111,8 @@ def cookie_login() -> Dict[str, Any]:
     logger.info("🔐 开始通过登录获取 Cookie...")
 
     try:
+        from ..lib.cookie_login import get_cookie_by_login
+
         result = get_cookie_by_login()
 
         if result.success:
@@ -132,6 +132,14 @@ def cookie_login() -> Dict[str, Any]:
                 "error": result.error,
             }
 
+    except ImportError as e:
+        logger.error(f"✗ GUI 登录依赖不可用: {e}")
+        return {
+            "success": False,
+            "cookie": "",
+            "user_agent": "",
+            "error": "当前运行环境不支持 GUI 登录，请手动填写 Cookie",
+        }
     except Exception as e:
         logger.error(f"✗ Cookie 登录获取异常: {e}")
         return {

@@ -139,7 +139,7 @@ export const App: React.FC = () => {
   const [inputError, setInputError] = useState<string | null>(null);         // 输入验证错误信息
 
   // --- 采集数量限制相关状态 ---
-  const [maxCount, setMaxCount] = useState<number>(0);  // 0表示不限制数量
+  const [maxCount, setMaxCount] = useState<number>(10);  // 默认 10 条，0 表示不限制
   const [showLimitMenu, setShowLimitMenu] = useState(false);  // 是否显示数量限制菜单
   const limitMenuRef = useRef<HTMLDivElement>(null);  // 数量限制菜单的引用，用于检测外部点击
 
@@ -256,6 +256,7 @@ export const App: React.FC = () => {
       // 并行检查首次运行和启动 Aria2
       // 注意：不在这里订阅日志，改为在用户打开日志面板时订阅
       Promise.all([
+        logger.initialize().catch(() => undefined),
         bridge.isFirstRun().then(isFirstRun => {
           if (isFirstRun) {
             setShowWelcomeWizard(true);
@@ -550,7 +551,7 @@ export const App: React.FC = () => {
           <LightErrorBoundary fallbackMessage="下载面板加载失败">
             <DownloadPanel isOpen={true} showLogs={showLogs} />
           </LightErrorBoundary>
-        ) : activeTab === TaskType.VIDEO_TRANSFORM ? (
+        ) : activeTab === TaskType.FILE_MANAGER || activeTab === TaskType.VIDEO_TRANSFORM ? (
           <LightErrorBoundary fallbackMessage="视频转码面板加载失败">
             <VideoTransformPanel />
           </LightErrorBoundary>

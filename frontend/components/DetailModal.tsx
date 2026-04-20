@@ -37,6 +37,15 @@ interface DetailModalProps {
   progress: Record<string, number>;
 }
 
+const buildDatedPath = (basePath: string, prefix?: string) => {
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const parts = [basePath.replace(/[\\/]+$/, ''), prefix, year, month, day].filter(Boolean);
+  return parts.join('/');
+};
+
 export const DetailModal: React.FC<DetailModalProps> = ({
   work, onClose, onPrev, onNext, hasPrev, hasNext,
   addDownload, startPolling, progress
@@ -187,7 +196,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
     try {
       const settings = await bridge.getSettings();
-      const downloadPath = settings.downloadPath || '';
+      const downloadPath = buildDatedPath(settings.downloadPath || '');
       const cookie = settings.cookie || '';
       const baseFilename = `${work.id}_${work.desc || '无标题'}`;
 
@@ -268,7 +277,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   const downloadCover = async () => {
     try {
       const settings = await bridge.getSettings();
-      const downloadPath = settings.downloadPath || '';
+      const downloadPath = buildDatedPath(settings.downloadPath || '');
       const cookie = settings.cookie || '';
       const filename = `${work.id}_cover.jpg`;
       const result = await addDownload(`${work.id}_cover`, work.cover, filename, downloadPath, cookie);
@@ -290,7 +299,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
     if (work.music?.url) {
       try {
         const settings = await bridge.getSettings();
-        const downloadPath = settings.downloadPath || '';
+        const downloadPath = buildDatedPath(settings.downloadPath || '');
         const cookie = settings.cookie || '';
         const filename = `${work.id}_music.mp3`;
         const result = await addDownload(`${work.id}_music`, work.music.url, filename, downloadPath, cookie);

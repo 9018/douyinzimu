@@ -4,7 +4,25 @@
  */
 
 import { AppSettings, TaskType } from '../types';
-import { TransformVideoResult, VideoFileItem } from './api';
+import {
+  BurnSubtitleOptions,
+  BurnSubtitleResult,
+  LocalCopyResult,
+  LocalDirectoryResult,
+  GenericPathResult,
+  GenerateSubtitleResult,
+  SubtitleCue,
+  SubtitleFileResult,
+  SubtitleApiTestResult,
+  TransformSubtitleOptions,
+  TransformVideoResult,
+  VideoFileItem,
+  VideoInfo,
+  WebDAVConfig,
+  WebDAVDirectoryResult,
+  WebDAVTestResult,
+  WebDAVUploadResult
+} from './api';
 import { handleError } from '../utils/errorHandler';
 import { logger } from './logger';
 import { sseClient } from './sseClient';
@@ -38,7 +56,7 @@ export interface Bridge {
   startTask: (type: TaskType, target: string, limit?: number, filters?: Record<string, string>) => Promise<{ task_id: string; status: string }>;
   openExternal: (url: string) => void;
   getSettings: () => Promise<AppSettings>;
-  saveSettings: (settings: AppSettings) => Promise<void>;
+  saveSettings: (settings: Partial<AppSettings>) => Promise<void>;
   selectFolder: () => Promise<string>;
   subscribeToLogs: (callback: (log: any) => void) => Promise<() => void>;
   getTaskStatus: (taskId?: string) => Promise<any[]>;
@@ -55,7 +73,24 @@ export interface Bridge {
   findLocalFile: (workId: string) => Promise<{ found: boolean; video_path: string | null; images: string[] | null }>;
   getMediaUrl: (filePath: string) => string;
   listVideoFiles: () => Promise<VideoFileItem[]>;
-  transformVideo: (filePath: string, ffmpegArgs: string) => Promise<TransformVideoResult>;
+  getVideoInfo: (filePath: string) => Promise<VideoInfo>;
+  transformVideo: (filePath: string, ffmpegArgs: string, subtitleOptions?: TransformSubtitleOptions) => Promise<TransformVideoResult>;
+  generateSubtitles: (filePath: string, subtitleOptions?: Omit<TransformSubtitleOptions, 'generate_subtitles'>) => Promise<GenerateSubtitleResult>;
+  readSubtitleFile: (filePath: string) => Promise<SubtitleFileResult>;
+  saveSubtitleFile: (filePath: string, cues: SubtitleCue[]) => Promise<SubtitleFileResult>;
+  burnSubtitleFile: (videoPath: string, subtitlePath: string, options?: BurnSubtitleOptions) => Promise<BurnSubtitleResult>;
+  testSubtitleApi: () => Promise<SubtitleApiTestResult>;
+  copyToLocal: (filePath: string, targetDir: string) => Promise<LocalCopyResult>;
+  listLocalEntries: (path: string) => Promise<LocalDirectoryResult>;
+  createLocalDirectory: (targetDir: string, name: string) => Promise<GenericPathResult>;
+  renameLocalPath: (path: string, newName: string) => Promise<GenericPathResult>;
+  deleteLocalPath: (path: string) => Promise<GenericPathResult>;
+  uploadToWebDAV: (filePath: string, category?: 'download' | 'transform', remoteDir?: string, config?: WebDAVConfig) => Promise<WebDAVUploadResult>;
+  testWebDAV: (config: WebDAVConfig) => Promise<WebDAVTestResult>;
+  listWebDAVDirectories: (config: WebDAVConfig & { remote_dir?: string }) => Promise<WebDAVDirectoryResult>;
+  createWebDAVDirectory: (config: WebDAVConfig & { target_dir: string; name: string }) => Promise<GenericPathResult>;
+  renameWebDAVPath: (config: WebDAVConfig & { path: string; new_name: string }) => Promise<GenericPathResult>;
+  deleteWebDAVPath: (config: WebDAVConfig & { path: string }) => Promise<GenericPathResult>;
 }
 
 export const bridge: Bridge = {
@@ -72,7 +107,7 @@ export const bridge: Bridge = {
     return ready;
   },
 
-  startTask: async (type, target, limit = 0, filters) => {
+  startTask: async (type, target, limit = 10, filters) => {
     try {
       logger.api.request('start task', { type, target, limit, filters });
       const result = await api.task.start({ type, target, limit, filters });
@@ -235,11 +270,168 @@ export const bridge: Bridge = {
     }
   },
 
-  transformVideo: async (filePath, ffmpegArgs) => {
+  getVideoInfo: async (filePath) => {
     try {
-      return await api.file.transformVideo(filePath, ffmpegArgs);
+      const result = await api.file.videoInfo(filePath);
+      if (!result.success) {
+        throw new Error(result.error || '获取视频信息失败');
+      }
+      return result.info;
     } catch (error) {
-      handleError(error, { filePath, ffmpegArgs }, { customMessage: 'transform video failed' });
+      handleError(error, { filePath }, { customMessage: 'get video info failed' });
+      throw error;
+    }
+  },
+
+  transformVideo: async (filePath, ffmpegArgs, subtitleOptions) => {
+    try {
+      return await api.file.transformVideo(filePath, ffmpegArgs, subtitleOptions);
+    } catch (error) {
+      handleError(error, { filePath, ffmpegArgs, subtitleOptions }, { customMessage: 'transform video failed' });
+      throw error;
+    }
+  },
+
+  generateSubtitles: async (filePath, subtitleOptions) => {
+    try {
+      return await api.file.generateSubtitles(filePath, subtitleOptions);
+    } catch (error) {
+      handleError(error, { filePath, subtitleOptions }, { customMessage: 'generate subtitles failed' });
+      throw error;
+    }
+  },
+
+  readSubtitleFile: async (filePath) => {
+    try {
+      return await api.file.readSubtitleFile(filePath);
+    } catch (error) {
+      handleError(error, { filePath }, { customMessage: 'read subtitle file failed' });
+      throw error;
+    }
+  },
+
+  saveSubtitleFile: async (filePath, cues) => {
+    try {
+      return await api.file.saveSubtitleFile(filePath, cues);
+    } catch (error) {
+      handleError(error, { filePath, cues }, { customMessage: 'save subtitle file failed' });
+      throw error;
+    }
+  },
+
+  burnSubtitleFile: async (videoPath, subtitlePath, options) => {
+    try {
+      return await api.file.burnSubtitleFile(videoPath, subtitlePath, options);
+    } catch (error) {
+      handleError(error, { videoPath, subtitlePath, options }, { customMessage: 'burn subtitle file failed' });
+      throw error;
+    }
+  },
+
+  testSubtitleApi: async () => {
+    try {
+      return await api.file.testSubtitleApi();
+    } catch (error) {
+      handleError(error, {}, { customMessage: 'test subtitle api failed' });
+      throw error;
+    }
+  },
+
+  copyToLocal: async (filePath, targetDir) => {
+    try {
+      return await api.file.copyToLocal(filePath, targetDir);
+    } catch (error) {
+      handleError(error, { filePath, targetDir }, { customMessage: 'copy to local failed' });
+      throw error;
+    }
+  },
+
+  listLocalEntries: async (path) => {
+    try {
+      return await api.file.listLocalEntries(path);
+    } catch (error) {
+      handleError(error, { path }, { customMessage: 'list local entries failed' });
+      throw error;
+    }
+  },
+
+  createLocalDirectory: async (targetDir, name) => {
+    try {
+      return await api.file.createLocalDirectory(targetDir, name);
+    } catch (error) {
+      handleError(error, { targetDir, name }, { customMessage: 'create local directory failed' });
+      throw error;
+    }
+  },
+
+  renameLocalPath: async (path, newName) => {
+    try {
+      return await api.file.renameLocalPath(path, newName);
+    } catch (error) {
+      handleError(error, { path, newName }, { customMessage: 'rename local path failed' });
+      throw error;
+    }
+  },
+
+  deleteLocalPath: async (path) => {
+    try {
+      return await api.file.deleteLocalPath(path);
+    } catch (error) {
+      handleError(error, { path }, { customMessage: 'delete local path failed' });
+      throw error;
+    }
+  },
+
+  uploadToWebDAV: async (filePath, category = 'download', remoteDir, config) => {
+    try {
+      return await api.file.uploadToWebDAV(filePath, category, remoteDir, config);
+    } catch (error) {
+      handleError(error, { filePath, category, remoteDir, config }, { customMessage: 'upload webdav failed' });
+      throw error;
+    }
+  },
+
+  testWebDAV: async (config) => {
+    try {
+      return await api.file.testWebDAV(config);
+    } catch (error) {
+      handleError(error, config, { customMessage: 'test webdav failed' });
+      throw error;
+    }
+  },
+
+  listWebDAVDirectories: async (config) => {
+    try {
+      return await api.file.listWebDAVDirectories(config);
+    } catch (error) {
+      handleError(error, config, { customMessage: 'list webdav directories failed' });
+      throw error;
+    }
+  },
+
+  createWebDAVDirectory: async (config) => {
+    try {
+      return await api.file.createWebDAVDirectory(config);
+    } catch (error) {
+      handleError(error, config, { customMessage: 'create webdav directory failed' });
+      throw error;
+    }
+  },
+
+  renameWebDAVPath: async (config) => {
+    try {
+      return await api.file.renameWebDAVPath(config);
+    } catch (error) {
+      handleError(error, config, { customMessage: 'rename webdav path failed' });
+      throw error;
+    }
+  },
+
+  deleteWebDAVPath: async (config) => {
+    try {
+      return await api.file.deleteWebDAVPath(config);
+    } catch (error) {
+      handleError(error, config, { customMessage: 'delete webdav path failed' });
       throw error;
     }
   },

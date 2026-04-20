@@ -13,7 +13,20 @@ import { AppSettings, TaskType, DouyinWork } from '../types';
 // 配置
 // ============================================================================
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+function resolveApiBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/$/, '');
+  }
+
+  return 'http://127.0.0.1:8000';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 // ============================================================================
 // 类型定义
@@ -80,9 +93,130 @@ export interface VideoFileItem {
   mtime: number;
 }
 
+export interface VideoInfo {
+  name: string;
+  path: string;
+  duration: number;
+  size: number;
+  bit_rate: number;
+  codec: string;
+  width: number;
+  height: number;
+  frame_rate: string;
+}
+
 export interface TransformVideoResult {
   success: boolean;
   output_path: string | null;
+  subtitle_path: string | null;
+  subtitle_json_path: string | null;
+  subtitle_wav_path: string | null;
+  error: string | null;
+}
+
+export interface TransformSubtitleOptions {
+  generate_subtitles?: boolean;
+  subtitle_language?: string;
+  subtitle_prompt?: string;
+}
+
+export interface GenerateSubtitleResult {
+  success: boolean;
+  subtitle_path: string | null;
+  subtitle_json_path: string | null;
+  subtitle_wav_path: string | null;
+  error: string | null;
+}
+
+export interface SubtitleCue {
+  index: number;
+  start: string;
+  end: string;
+  text: string;
+}
+
+export interface SubtitleFileResult {
+  success: boolean;
+  file_path: string | null;
+  cues: SubtitleCue[];
+  error: string | null;
+}
+
+export interface BurnSubtitleOptions {
+  font_name?: string;
+  font_size?: number;
+  margin_v?: number;
+  outline?: number;
+  shadow?: number;
+  primary_color?: string;
+  outline_color?: string;
+  alignment?: number;
+}
+
+export interface BurnSubtitleResult {
+  success: boolean;
+  output_path: string | null;
+  error: string | null;
+}
+
+export interface SubtitleApiTestResult {
+  success: boolean;
+  detail: string | null;
+}
+
+export interface WebDAVUploadResult {
+  success: boolean;
+  remote_path: string | null;
+  error: string | null;
+}
+
+export interface WebDAVConfig {
+  webdav_url: string;
+  webdav_username: string;
+  webdav_password: string;
+  webdav_base_path: string;
+}
+
+export interface LocalCopyResult {
+  success: boolean;
+  output_path: string | null;
+  error: string | null;
+}
+
+export interface WebDAVDirectoryItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+export interface WebDAVDirectoryResult {
+  success: boolean;
+  entries: WebDAVDirectoryItem[];
+  error: string | null;
+}
+
+export interface WebDAVTestResult {
+  success: boolean;
+  error: string | null;
+}
+
+export interface LocalEntryItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+}
+
+export interface LocalDirectoryResult {
+  success: boolean;
+  entries: LocalEntryItem[];
+  error: string | null;
+}
+
+export interface GenericPathResult {
+  success: boolean;
+  path: string | null;
   error: string | null;
 }
 
@@ -274,11 +408,120 @@ export const api = {
     },
 
     /** 视频转码 */
-    transformVideo: (filePath: string, ffmpegArgs: string) =>
+    transformVideo: (filePath: string, ffmpegArgs: string, subtitleOptions?: TransformSubtitleOptions) =>
       post<TransformVideoResult>('/api/file/transform', {
         file_path: filePath,
         ffmpeg_args: ffmpegArgs,
+        ...(subtitleOptions ?? {}),
       }),
+
+    /** 单独生成字幕 */
+    generateSubtitles: (filePath: string, subtitleOptions?: Omit<TransformSubtitleOptions, 'generate_subtitles'>) =>
+      post<GenerateSubtitleResult>('/api/file/subtitles', {
+        file_path: filePath,
+        ...(subtitleOptions ?? {}),
+      }),
+
+    /** 读取字幕文件 */
+    readSubtitleFile: (filePath: string) =>
+      post<SubtitleFileResult>('/api/file/subtitle/read', {
+        file_path: filePath,
+      }),
+
+    /** 保存字幕文件 */
+    saveSubtitleFile: (filePath: string, cues: SubtitleCue[]) =>
+      post<SubtitleFileResult>('/api/file/subtitle/save', {
+        file_path: filePath,
+        cues,
+      }),
+
+    /** 烧录内嵌字幕 */
+    burnSubtitleFile: (
+      videoPath: string,
+      subtitlePath: string,
+      options?: BurnSubtitleOptions
+    ) =>
+      post<BurnSubtitleResult>('/api/file/subtitle/burn', {
+        video_path: videoPath,
+        subtitle_path: subtitlePath,
+        ...(options ?? {}),
+      }),
+
+    /** 测试本地 Whisper */
+    testSubtitleApi: () =>
+      post<SubtitleApiTestResult>('/api/file/subtitle/test-api'),
+
+    /** 视频基础信息 */
+    videoInfo: (filePath: string) =>
+      post<{ success: boolean; info: VideoInfo; error: string | null }>('/api/file/video-info', {
+        file_path: filePath,
+      }),
+
+    /** 复制到本地目录 */
+    copyToLocal: (filePath: string, targetDir: string) =>
+      post<LocalCopyResult>('/api/file/copy-local', {
+        file_path: filePath,
+        target_dir: targetDir,
+      }),
+
+    /** 列出本地目录 */
+    listLocalEntries: (path: string) =>
+      post<LocalDirectoryResult>('/api/file/local-list', {
+        path,
+      }),
+
+    /** 本地新建目录 */
+    createLocalDirectory: (targetDir: string, name: string) =>
+      post<GenericPathResult>('/api/file/local-mkdir', {
+        target_dir: targetDir,
+        name,
+      }),
+
+    /** 本地重命名 */
+    renameLocalPath: (path: string, newName: string) =>
+      post<GenericPathResult>('/api/file/local-rename', {
+        path,
+        new_name: newName,
+      }),
+
+    /** 本地删除 */
+    deleteLocalPath: (path: string) =>
+      post<GenericPathResult>('/api/file/local-delete', {
+        path,
+      }),
+
+    /** 上传到 WebDAV */
+    uploadToWebDAV: (
+      filePath: string,
+      category: 'download' | 'transform' = 'download',
+      remoteDir?: string,
+      config?: WebDAVConfig
+    ) =>
+      post<WebDAVUploadResult>('/api/file/upload-webdav', {
+        file_path: filePath,
+        category,
+        remote_dir: remoteDir,
+        ...(config ?? {}),
+      }),
+
+    /** 测试 WebDAV 连接 */
+    testWebDAV: (config: WebDAVConfig) => post<WebDAVTestResult>('/api/file/webdav/test', config),
+
+    /** 列出 WebDAV 目录 */
+    listWebDAVDirectories: (config: WebDAVConfig & { remote_dir?: string }) =>
+      post<WebDAVDirectoryResult>('/api/file/webdav/list', config),
+
+    /** WebDAV 新建目录 */
+    createWebDAVDirectory: (config: WebDAVConfig & { target_dir: string; name: string }) =>
+      post<GenericPathResult>('/api/file/webdav/mkdir', config),
+
+    /** WebDAV 重命名 */
+    renameWebDAVPath: (config: WebDAVConfig & { path: string; new_name: string }) =>
+      post<GenericPathResult>('/api/file/webdav/rename', config),
+
+    /** WebDAV 删除 */
+    deleteWebDAVPath: (config: WebDAVConfig & { path: string }) =>
+      post<GenericPathResult>('/api/file/webdav/delete', config),
 
     /** 获取媒体文件 URL */
     getMediaUrl: (filePath: string) => {

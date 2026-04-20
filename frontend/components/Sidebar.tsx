@@ -1,8 +1,9 @@
 
 import {
   Download,
+  Files,
   Film,
-  SlidersHorizontal,
+  Captions,
   Github,
   Hash,
   Heart,
@@ -123,9 +124,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
         >
-          <SlidersHorizontal size={18} className={activeTab === TaskType.VIDEO_TRANSFORM ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} />
-          <span className="font-medium flex-1 text-left">视频转码</span>
+          <Captions size={18} className={activeTab === TaskType.VIDEO_TRANSFORM ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} />
+          <span className="font-medium flex-1 text-left">字幕工坊</span>
           {activeTab === TaskType.VIDEO_TRANSFORM ? <div className="w-1.5 h-1.5 bg-white rounded-full opacity-50"></div> : null}
+        </button>
+
+        <button
+          onClick={() => setActiveTab(TaskType.FILE_MANAGER)}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${activeTab === TaskType.FILE_MANAGER
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+        >
+          <Files size={18} className={activeTab === TaskType.FILE_MANAGER ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} />
+          <span className="font-medium flex-1 text-left">文件管理</span>
+          {activeTab === TaskType.FILE_MANAGER ? <div className="w-1.5 h-1.5 bg-white rounded-full opacity-50"></div> : null}
         </button>
 
         <div className="h-px bg-slate-800 my-2"></div>

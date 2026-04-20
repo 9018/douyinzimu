@@ -120,7 +120,6 @@ class SSEManager:
             except Exception as e:
                 logger.warning(f"[SSE] 放入队列失败: {e}")
 
-        logger.debug(f"[SSE] broadcast_sync: 发送到 {sent_count}/{client_count} 个客户端")
 
     async def _broadcast_message(self, message: str) -> None:
         """内部方法：广播消息"""

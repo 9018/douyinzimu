@@ -10,6 +10,7 @@
 
 import os
 from threading import Lock
+from datetime import datetime
 
 import ujson as json
 from loguru import logger
@@ -77,6 +78,17 @@ class Douyin:
         self.info = {}
         self.render_data = {}
         self.aria2_conf = ""
+
+    def _get_day_download_dir(self) -> str:
+        now = datetime.now()
+        day_dir = os.path.join(
+            self.down_path,
+            now.strftime("%Y"),
+            now.strftime("%m"),
+            now.strftime("%d"),
+        )
+        os.makedirs(day_dir, exist_ok=True)
+        return day_dir
 
     def run(self):
         """运行爬虫"""
@@ -253,6 +265,7 @@ class Douyin:
     def _save_aria2_config(self):
         """保存aria2下载配置文件"""
         lines = []
+        day_dir = self._get_day_download_dir()
 
         # 保存主页链接
         if self.type in ["following", "follower"]:
@@ -272,10 +285,8 @@ class Douyin:
 
                 # 图文作品
                 if isinstance(line["download_addr"], list):
-                    if self.type == "aweme":
-                        down_path = self.down_path.replace(line["id"], filename)
-                    else:
-                        down_path = os.path.join(self.down_path, filename)
+                    down_path = os.path.join(day_dir, filename)
+                    os.makedirs(down_path, exist_ok=True)
 
                     for index, addr in enumerate(line["download_addr"]):
                         lines.append(
@@ -284,7 +295,7 @@ class Douyin:
                 # 视频作品
                 elif isinstance(line["download_addr"], str):
                     lines.append(
-                        f'{line["download_addr"]}\n dir={self.down_path}\n out={filename}.mp4\n'
+                        f'{line["download_addr"]}\n dir={day_dir}\n out={filename}.mp4\n'
                     )
                 else:
                     logger.error("下载地址错误")

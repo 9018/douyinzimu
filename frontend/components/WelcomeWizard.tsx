@@ -35,7 +35,19 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
     enableIncrementalFetch: APP_DEFAULTS.ENABLE_INCREMENTAL_FETCH,
     aria2Host: APP_DEFAULTS.ARIA2_HOST,
     aria2Port: APP_DEFAULTS.ARIA2_PORT,
-    aria2Secret: APP_DEFAULTS.ARIA2_SECRET
+    aria2Secret: APP_DEFAULTS.ARIA2_SECRET,
+    webdavEnabled: APP_DEFAULTS.WEBDAV_ENABLED,
+    webdavUrl: APP_DEFAULTS.WEBDAV_URL,
+    webdavUsername: APP_DEFAULTS.WEBDAV_USERNAME,
+    webdavPassword: APP_DEFAULTS.WEBDAV_PASSWORD,
+    webdavBasePath: APP_DEFAULTS.WEBDAV_BASE_PATH,
+    webdavUploadDownloads: APP_DEFAULTS.WEBDAV_UPLOAD_DOWNLOADS,
+    webdavUploadTransformed: APP_DEFAULTS.WEBDAV_UPLOAD_TRANSFORMED,
+    subtitleLanguage: APP_DEFAULTS.SUBTITLE_LANGUAGE,
+    subtitlePrompt: APP_DEFAULTS.SUBTITLE_PROMPT,
+    subtitleLocalWhisperUrl: APP_DEFAULTS.SUBTITLE_LOCAL_WHISPER_URL,
+    subtitleLocalModel: APP_DEFAULTS.SUBTITLE_LOCAL_MODEL,
+    subtitleWordTimestamps: APP_DEFAULTS.SUBTITLE_WORD_TIMESTAMPS,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);

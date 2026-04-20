@@ -17,6 +17,7 @@ FastAPI Server - 后端 HTTP API 服务
 """
 
 import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -39,6 +40,32 @@ from .routers import (
 )
 from .sse import sse
 from .state import state
+
+_SSE_LOG_SINK_REGISTERED = False
+
+
+def _register_sse_log_sink() -> None:
+    global _SSE_LOG_SINK_REGISTERED
+    if _SSE_LOG_SINK_REGISTERED:
+        return
+
+    def _sink(message) -> None:
+        record = message.record
+        try:
+            sse.broadcast_sync(
+                "log",
+                {
+                    "id": uuid.uuid4().hex[:10],
+                    "timestamp": record["time"].strftime("%H:%M:%S.%f")[:-3],
+                    "level": record["level"].name.lower(),
+                    "message": record["message"],
+                },
+            )
+        except Exception:
+            pass
+
+    logger.add(_sink, level="DEBUG", format="{message}", enqueue=False)
+    _SSE_LOG_SINK_REGISTERED = True
 
 # ============================================================================
 # 响应模型
@@ -96,6 +123,8 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+_register_sse_log_sink()
 
 app.add_middleware(
     CORSMiddleware,

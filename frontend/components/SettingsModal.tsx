@@ -1,5 +1,5 @@
 
-import { ChevronDown, ChevronUp, ExternalLink, FolderOpen, LogIn, Save, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, FolderOpen, Loader2, LogIn, Save, TestTube2, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { APP_DEFAULTS } from '../constants';
 import { aria2Service } from '../services/aria2Service';
@@ -92,10 +92,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     enableIncrementalFetch: APP_DEFAULTS.ENABLE_INCREMENTAL_FETCH,
     aria2Host: APP_DEFAULTS.ARIA2_HOST,
     aria2Port: APP_DEFAULTS.ARIA2_PORT,
-    aria2Secret: APP_DEFAULTS.ARIA2_SECRET
+    aria2Secret: APP_DEFAULTS.ARIA2_SECRET,
+    webdavEnabled: APP_DEFAULTS.WEBDAV_ENABLED,
+    webdavUrl: APP_DEFAULTS.WEBDAV_URL,
+    webdavUsername: APP_DEFAULTS.WEBDAV_USERNAME,
+    webdavPassword: APP_DEFAULTS.WEBDAV_PASSWORD,
+    webdavBasePath: APP_DEFAULTS.WEBDAV_BASE_PATH,
+    webdavUploadDownloads: APP_DEFAULTS.WEBDAV_UPLOAD_DOWNLOADS,
+    webdavUploadTransformed: APP_DEFAULTS.WEBDAV_UPLOAD_TRANSFORMED,
+    subtitleLanguage: APP_DEFAULTS.SUBTITLE_LANGUAGE,
+    subtitlePrompt: APP_DEFAULTS.SUBTITLE_PROMPT,
+    subtitleLocalWhisperUrl: APP_DEFAULTS.SUBTITLE_LOCAL_WHISPER_URL,
+    subtitleLocalModel: APP_DEFAULTS.SUBTITLE_LOCAL_MODEL,
+    subtitleWordTimestamps: APP_DEFAULTS.SUBTITLE_WORD_TIMESTAMPS,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isTestingSubtitleApi, setIsTestingSubtitleApi] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<keyof AppSettings, string>>>({});
 
   useEffect(() => {
@@ -138,6 +151,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     // 验证同时下载任务数
     if (settings.maxConcurrency < 1 || settings.maxConcurrency > 10) {
       newErrors.maxConcurrency = "同时下载任务数必须在1-10之间";
+    }
+
+    if (!settings.subtitleLocalWhisperUrl.trim()) {
+      newErrors.subtitleLocalWhisperUrl = "本地 Whisper 地址不能为空";
+    }
+
+    if (!settings.subtitleLocalModel.trim()) {
+      newErrors.subtitleLocalModel = "本地 Whisper 模型不能为空";
     }
 
     setErrors(newErrors);
@@ -190,6 +211,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
     } catch (e) {
       console.error("Failed to select folder", e);
+    }
+  };
+
+  const handleTestSubtitleApi = async () => {
+    setIsTestingSubtitleApi(true);
+    try {
+      await bridge.saveSettings({
+        subtitleLanguage: settings.subtitleLanguage,
+        subtitlePrompt: settings.subtitlePrompt,
+        subtitleLocalWhisperUrl: settings.subtitleLocalWhisperUrl,
+        subtitleLocalModel: settings.subtitleLocalModel,
+        subtitleWordTimestamps: settings.subtitleWordTimestamps,
+      });
+      const result = await bridge.testSubtitleApi();
+      if (result.success) {
+        toast.success(result.detail || '本地 Whisper 测试成功');
+      } else {
+        toast.error(result.detail || '本地 Whisper 测试失败');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '本地 Whisper 测试失败');
+    } finally {
+      setIsTestingSubtitleApi(false);
     }
   };
 
@@ -448,6 +492,107 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </div>
             </label>
           </div>
+
+          <div className="border-t border-gray-100 pt-5 space-y-4">
+            <div>
+              <div className="text-sm font-semibold text-gray-700">本地 Whisper 配置</div>
+              <p className="text-xs text-gray-400 mt-1">
+                这里配置本地 Whisper 服务地址和默认模型，保存后会写入 `config/settings.json`。
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="subtitle-local-whisper-url" className="block text-sm font-semibold text-gray-700 mb-2">
+                本地 Whisper 地址
+              </label>
+              <input
+                id="subtitle-local-whisper-url"
+                name="subtitleLocalWhisperUrl"
+                type="text"
+                value={settings.subtitleLocalWhisperUrl}
+                onChange={(e) => setSettings({ ...settings, subtitleLocalWhisperUrl: e.target.value })}
+                placeholder="http://127.0.0.1:9001"
+                className={`w-full px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.subtitleLocalWhisperUrl ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'}`}
+              />
+              {errors.subtitleLocalWhisperUrl && (
+                <p className="mt-1.5 text-xs text-red-500">{errors.subtitleLocalWhisperUrl}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="subtitle-local-model" className="block text-sm font-semibold text-gray-700 mb-2">
+                  默认模型
+                </label>
+                <input
+                  id="subtitle-local-model"
+                  name="subtitleLocalModel"
+                  type="text"
+                  value={settings.subtitleLocalModel}
+                  onChange={(e) => setSettings({ ...settings, subtitleLocalModel: e.target.value })}
+                  placeholder="medium"
+                  className={`w-full px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.subtitleLocalModel ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'}`}
+                />
+                {errors.subtitleLocalModel && (
+                  <p className="mt-1.5 text-xs text-red-500">{errors.subtitleLocalModel}</p>
+                )}
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mt-8">
+                <input
+                  type="checkbox"
+                  checked={settings.subtitleWordTimestamps}
+                  onChange={(e) => setSettings({ ...settings, subtitleWordTimestamps: e.target.checked })}
+                />
+                默认开启逐词时间戳
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="subtitle-language" className="block text-sm font-semibold text-gray-700 mb-2">
+                  语言代码
+                </label>
+                <input
+                  id="subtitle-language"
+                  name="subtitleLanguage"
+                  type="text"
+                  value={settings.subtitleLanguage}
+                  onChange={(e) => setSettings({ ...settings, subtitleLanguage: e.target.value })}
+                  placeholder="zh"
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="subtitle-prompt" className="block text-sm font-semibold text-gray-700 mb-2">
+                提示词
+              </label>
+              <textarea
+                id="subtitle-prompt"
+                name="subtitlePrompt"
+                value={settings.subtitlePrompt}
+                onChange={(e) => setSettings({ ...settings, subtitlePrompt: e.target.value })}
+                placeholder="例如：输出简体中文字幕，保留口语停顿，不要翻译专有名词。"
+                rows={3}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+              />
+              <p className="mt-1.5 text-xs text-gray-400">
+                提示词会直接传给本地 Whisper 服务。
+              </p>
+            </div>
+
+            <button
+              onClick={handleTestSubtitleApi}
+              disabled={isTestingSubtitleApi}
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isTestingSubtitleApi ? <Loader2 size={16} className="animate-spin" /> : <TestTube2 size={16} />}
+              测试本地 Whisper
+            </button>
+          </div>
+
         </div>
 
         <div className="px-6 py-4 bg-gray-50/50 border-t border-gray-100 flex justify-end gap-3">

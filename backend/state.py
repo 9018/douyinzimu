@@ -73,7 +73,7 @@ class AppState:
         return {
             "ready": True,
             "aria2": aria2_ok,
-            # "config": len(settings.get("cookie", "")) > 0,
+            "config": True,
             "error": None,
         }
 

@@ -36,6 +36,18 @@ class SettingsUpdate(BaseModel):
     aria2Host: Optional[str] = None
     aria2Port: Optional[int] = Field(None, ge=1, le=65535)
     aria2Secret: Optional[str] = None
+    webdavEnabled: Optional[bool] = None
+    webdavUrl: Optional[str] = None
+    webdavUsername: Optional[str] = None
+    webdavPassword: Optional[str] = None
+    webdavBasePath: Optional[str] = None
+    webdavUploadDownloads: Optional[bool] = None
+    webdavUploadTransformed: Optional[bool] = None
+    subtitleLanguage: Optional[str] = None
+    subtitlePrompt: Optional[str] = None
+    subtitleLocalWhisperUrl: Optional[str] = None
+    subtitleLocalModel: Optional[str] = None
+    subtitleWordTimestamps: Optional[bool] = None
 
 
 class SettingsResponse(BaseModel):
@@ -52,6 +64,18 @@ class SettingsResponse(BaseModel):
     aria2Host: str = ARIA2_DEFAULTS["HOST"]
     aria2Port: int = ARIA2_DEFAULTS["PORT"]
     aria2Secret: str = ""
+    webdavEnabled: bool = False
+    webdavUrl: str = ""
+    webdavUsername: str = ""
+    webdavPassword: str = ""
+    webdavBasePath: str = ""
+    webdavUploadDownloads: bool = False
+    webdavUploadTransformed: bool = False
+    subtitleLanguage: str = ""
+    subtitlePrompt: str = ""
+    subtitleLocalWhisperUrl: str = DEFAULT_SETTINGS["subtitleLocalWhisperUrl"]
+    subtitleLocalModel: str = DEFAULT_SETTINGS["subtitleLocalModel"]
+    subtitleWordTimestamps: bool = DEFAULT_SETTINGS["subtitleWordTimestamps"]
 
 
 class FirstRunResponse(BaseModel):

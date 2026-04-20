@@ -11,6 +11,7 @@ export enum TaskType {
   FOLLOWING = 'following',   // 用户关注
   FOLLOWER = 'follower',     // 用户粉丝
   DOWNLOAD_MANAGER = 'download_manager', // 下载管理
+  FILE_MANAGER = 'file_manager', // 文件管理
   VIDEO_TRANSFORM = 'video_transform', // 视频转码
 }
 
@@ -66,6 +67,18 @@ export interface AppSettings {
   aria2Host: string;
   aria2Port: number;
   aria2Secret: string;
+  webdavEnabled: boolean;
+  webdavUrl: string;
+  webdavUsername: string;
+  webdavPassword: string;
+  webdavBasePath: string;
+  webdavUploadDownloads: boolean;
+  webdavUploadTransformed: boolean;
+  subtitleLanguage: string;
+  subtitlePrompt: string;
+  subtitleLocalWhisperUrl: string;
+  subtitleLocalModel: string;
+  subtitleWordTimestamps: boolean;
 }
 
 export interface GlobalDownloadStat {

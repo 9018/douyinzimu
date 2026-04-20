@@ -46,6 +46,18 @@ class SettingsManager:
             "必须是1-65535的整数",
         ),
         "aria2Secret": (lambda x: isinstance(x, str), "必须是字符串"),
+        "webdavEnabled": (lambda x: isinstance(x, bool), "必须是布尔值"),
+        "webdavUrl": (lambda x: isinstance(x, str), "必须是字符串"),
+        "webdavUsername": (lambda x: isinstance(x, str), "必须是字符串"),
+        "webdavPassword": (lambda x: isinstance(x, str), "必须是字符串"),
+        "webdavBasePath": (lambda x: isinstance(x, str), "必须是字符串"),
+        "webdavUploadDownloads": (lambda x: isinstance(x, bool), "必须是布尔值"),
+        "webdavUploadTransformed": (lambda x: isinstance(x, bool), "必须是布尔值"),
+        "subtitleLanguage": (lambda x: isinstance(x, str), "必须是字符串"),
+        "subtitlePrompt": (lambda x: isinstance(x, str), "必须是字符串"),
+        "subtitleLocalWhisperUrl": (lambda x: isinstance(x, str) and len(x) > 0, "必须是非空字符串"),
+        "subtitleLocalModel": (lambda x: isinstance(x, str) and len(x) > 0, "必须是非空字符串"),
+        "subtitleWordTimestamps": (lambda x: isinstance(x, bool), "必须是布尔值"),
     }
 
     def __init__(self, auto_load: bool = True) -> None:

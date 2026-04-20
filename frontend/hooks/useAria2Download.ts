@@ -18,6 +18,7 @@ interface DownloadInfo {
   gid: string;
   filename: string;
   url: string;
+  dir: string;
 }
 
 
@@ -51,6 +52,46 @@ export const useAria2Download = () => {
   const onCompleteCallbackRef = useRef<(() => void) | null>(null);
   const statsRef = useRef<{ completed: number; failed: number }>({ completed: 0, failed: 0 });
   const prevConnectedRef = useRef(false);
+  const uploadedRef = useRef<Set<string>>(new Set());
+
+  const toRelativePath = useCallback((basePath: string, dir: string, filename: string) => {
+    const normalizedBase = basePath.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedDir = dir.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedFile = filename.replace(/\\/g, '/');
+    const fullPath = `${normalizedDir}/${normalizedFile}`;
+    if (normalizedBase && fullPath.startsWith(`${normalizedBase}/`)) {
+      return fullPath.slice(normalizedBase.length + 1);
+    }
+    return normalizedFile;
+  }, []);
+
+  const uploadIfNeeded = useCallback(async (dir: string, filename: string) => {
+    try {
+      const settings = await bridge.getSettings();
+      if (!settings.webdavEnabled || !settings.webdavUploadDownloads) {
+        return;
+      }
+
+      const relativePath = toRelativePath(settings.downloadPath, dir, filename);
+      if (uploadedRef.current.has(relativePath)) {
+        return;
+      }
+
+      const result = await bridge.uploadToWebDAV(relativePath, 'download');
+      if (result.success) {
+        uploadedRef.current.add(relativePath);
+        logger.success(`下载文件已上传到 WebDAV: ${relativePath}`, undefined, 'webdav');
+      } else {
+        logger.error(`下载文件上传 WebDAV 失败: ${result.error || relativePath}`, undefined, 'webdav');
+      }
+    } catch (error) {
+      logger.error(
+        `下载文件上传 WebDAV 异常: ${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+        'webdav'
+      );
+    }
+  }, [toRelativePath]);
 
   /**
    * 初始化Aria2连接
@@ -178,6 +219,7 @@ export const useAria2Download = () => {
               downloads.delete(workId);
               statsRef.current.completed++;
               newProgress[workId] = 100;
+              await uploadIfNeeded(info.dir, info.filename);
             } else if (task.status === 'error') {
               const errorMsg = task.errorMessage || task.errorCode || '未知错误';
               logger.error(`下载失败: ${info.filename} - ${errorMsg}`);
@@ -220,7 +262,7 @@ export const useAria2Download = () => {
         totalProgress: activeCount > 0 ? Math.round(totalProgress / activeCount) : 0,
       });
     }, 1000);
-  }, []);
+  }, [uploadIfNeeded]);
 
   /**
    * 停止轮询
@@ -312,7 +354,7 @@ export const useAria2Download = () => {
       }
 
       // 确保任务添加后正确加入跟踪映射表
-      downloadsRef.current.set(workId, { workId, gid, filename, url });
+      downloadsRef.current.set(workId, { workId, gid, filename, url, dir: downloadPath });
 
       // 初始化进度为0
       setProgress(prev => ({ ...prev, [workId]: 0 }));

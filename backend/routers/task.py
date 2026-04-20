@@ -33,7 +33,7 @@ class StartTaskRequest(BaseModel):
 
     type: str
     target: str
-    limit: int = 0
+    limit: int = 10
     filters: Optional[Dict[str, str]] = None
 
 

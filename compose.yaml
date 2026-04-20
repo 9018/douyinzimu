@@ -2,29 +2,33 @@
 # 开发模式请使用: docker compose -f compose.dev.yaml up -d --build
 services:
   douyin:
-    container_name: douyin-crawler
+    container_name: ${DOUYIN_CONTAINER_NAME:-douyinzimu-crawler}
     build:
       context: .
       args:
-        VITE_API_BASE_URL: http://localhost:8000
+        VITE_API_BASE_URL: ""
     ports:
-      - "8000:8000"
+      - "${DOUYIN_HOST_PORT:-8001}:8000"
+      - "${DOUYIN_ARIA2_HOST_PORT:-6801}:6800"
     environment:
       DOUYIN_HOST: 0.0.0.0
       DOUYIN_PORT: 8000
       DOUYIN_ARIA2_SECRET: douyin_crawler_default_secret
       PYTHONUNBUFFERED: "1"
+      TZ: Asia/Shanghai
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/app/config
       - ./download:/app/download
     command: >
       bash -lc '
       mkdir -p /app/download;
-      ARIA2_SECRET="${DOUYIN_ARIA2_SECRET:-douyin_crawler_default_secret}";
+      ARIA2_SECRET="$${DOUYIN_ARIA2_SECRET:-douyin_crawler_default_secret}";
       aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all \
-             --rpc-secret="${ARIA2_SECRET}" --rpc-listen-port=6800 \
+             --rpc-secret="$${ARIA2_SECRET}" --rpc-listen-port=6800 \
              --dir=/app/download -D;
       cd /app && python -m backend.server --host 0.0.0.0 --port 8000
       '
