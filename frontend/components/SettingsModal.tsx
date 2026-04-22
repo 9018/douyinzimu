@@ -1,5 +1,5 @@
 
-import { ChevronDown, ChevronUp, ExternalLink, FolderOpen, Loader2, LogIn, Save, TestTube2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, FolderOpen, Loader2, LogIn, RefreshCw, Save, TestTube2, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { APP_DEFAULTS } from '../constants';
 import { aria2Service } from '../services/aria2Service';
@@ -7,6 +7,22 @@ import { bridge, isGUIMode } from '../services/bridge';
 import { logger } from '../services/logger';
 import { AppSettings } from '../types';
 import { toast } from './Toast';
+
+const whisperModelOptions = [
+  'tiny',
+  'base',
+  'small',
+  'medium',
+  'large-v3',
+  'large-v3-turbo',
+];
+
+const subtitleModeOptions = [
+  { value: 'zh', label: '仅中文（默认）' },
+  { value: 'en', label: '仅英文' },
+  { value: 'bilingual', label: '原文 + 英文双语' },
+  { value: 'source', label: '仅原文（自动识别）' },
+];
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -101,28 +117,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     webdavUploadDownloads: APP_DEFAULTS.WEBDAV_UPLOAD_DOWNLOADS,
     webdavUploadTransformed: APP_DEFAULTS.WEBDAV_UPLOAD_TRANSFORMED,
     subtitleLanguage: APP_DEFAULTS.SUBTITLE_LANGUAGE,
+    subtitleMode: APP_DEFAULTS.SUBTITLE_MODE,
     subtitlePrompt: APP_DEFAULTS.SUBTITLE_PROMPT,
     subtitleLocalWhisperUrl: APP_DEFAULTS.SUBTITLE_LOCAL_WHISPER_URL,
     subtitleLocalModel: APP_DEFAULTS.SUBTITLE_LOCAL_MODEL,
     subtitleWordTimestamps: APP_DEFAULTS.SUBTITLE_WORD_TIMESTAMPS,
+    subtitleAutoGenerateOnUpload: APP_DEFAULTS.SUBTITLE_AUTO_GENERATE_ON_UPLOAD,
+    subtitleAutoBurnAfterGenerate: APP_DEFAULTS.SUBTITLE_AUTO_BURN_AFTER_GENERATE,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isTestingSubtitleApi, setIsTestingSubtitleApi] = useState(false);
+  const [isRestartingWhisper, setIsRestartingWhisper] = useState(false);
+  const [isLoadingWhisperStatus, setIsLoadingWhisperStatus] = useState(false);
+  const [whisperStatus, setWhisperStatus] = useState<Awaited<ReturnType<typeof bridge.getWhisperStatus>> | null>(null);
   const [errors, setErrors] = useState<Partial<Record<keyof AppSettings, string>>>({});
+  const [saveMessage, setSaveMessage] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       loadSettings();
+      loadWhisperStatus();
     }
   }, [isOpen]);
 
   const loadSettings = async () => {
     try {
       const data = await bridge.getSettings();
-      setSettings(data);
+      setSettings({
+        ...data,
+        subtitleLanguage: data.subtitleLanguage || APP_DEFAULTS.SUBTITLE_LANGUAGE,
+        subtitleMode: data.subtitleMode || APP_DEFAULTS.SUBTITLE_MODE,
+        subtitlePrompt: data.subtitlePrompt || APP_DEFAULTS.SUBTITLE_PROMPT,
+      });
+      setSaveMessage('');
     } catch (e) {
       console.error("Failed to load settings", e);
+    }
+  };
+
+  const loadWhisperStatus = async () => {
+    setIsLoadingWhisperStatus(true);
+    try {
+      const status = await bridge.getWhisperStatus();
+      setWhisperStatus(status);
+    } catch (e) {
+      console.error("Failed to load whisper status", e);
+    } finally {
+      setIsLoadingWhisperStatus(false);
     }
   };
 
@@ -162,6 +204,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
 
     setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      setSaveMessage('');
+    }
     return Object.keys(newErrors).length === 0;
   };
 
@@ -173,6 +218,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
 
     setIsSaving(true);
+    setSaveMessage('');
     try {
       await bridge.saveSettings(settings);
       logger.success('✓ 配置保存成功');
@@ -188,15 +234,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
 
       toast.success('配置保存成功');
-      // 等待后端日志传递到前端（100ms足够）
-      await new Promise(resolve => setTimeout(resolve, 100));
-      // 关闭弹窗
-      onClose();
+      setSaveMessage('配置已保存。Whisper 模型变更需要重启容器后才会生效。');
+      await loadWhisperStatus();
     } catch (e) {
       // 保存失败时在日志和Toast中输出
       const errorMsg = e instanceof Error ? e.message : String(e);
       logger.error(`✗ 配置保存失败: ${errorMsg}`);
       toast.error(`配置保存失败: ${errorMsg}`);
+      setSaveMessage(`保存失败：${errorMsg}`);
       console.error("Failed to save settings", e);
     } finally {
       setIsSaving(false);
@@ -219,10 +264,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     try {
       await bridge.saveSettings({
         subtitleLanguage: settings.subtitleLanguage,
+        subtitleMode: settings.subtitleMode,
         subtitlePrompt: settings.subtitlePrompt,
         subtitleLocalWhisperUrl: settings.subtitleLocalWhisperUrl,
         subtitleLocalModel: settings.subtitleLocalModel,
         subtitleWordTimestamps: settings.subtitleWordTimestamps,
+        subtitleAutoGenerateOnUpload: settings.subtitleAutoGenerateOnUpload,
+        subtitleAutoBurnAfterGenerate: settings.subtitleAutoBurnAfterGenerate,
       });
       const result = await bridge.testSubtitleApi();
       if (result.success) {
@@ -237,6 +285,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   };
 
+  const handleRestartWhisper = async () => {
+    setIsRestartingWhisper(true);
+    try {
+      const result = await bridge.restartWhisper();
+      toast.success(result.message);
+      setSaveMessage('Whisper 正在重启并应用新模型，首次下载模型时会持续几分钟。');
+      await loadWhisperStatus();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Whisper 重启失败');
+    } finally {
+      setIsRestartingWhisper(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -245,10 +307,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden transform transition-all scale-100"
+        className="mx-3 max-h-[92vh] w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl transform transition-all scale-100 sm:mx-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+        <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50 sm:px-6">
           <h3 className="text-lg font-bold text-gray-800">系统设置</h3>
           <button
             onClick={onClose}
@@ -258,14 +320,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="max-h-[calc(92vh-132px)] overflow-y-auto p-4 space-y-5 sm:p-6">
           {/* Cookie Setting */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="cookie-input" className="block text-sm font-semibold text-gray-700">
                 Cookie 设置
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={async () => {
                     try {
@@ -388,7 +450,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <label htmlFor="download-path-input" className="block text-sm font-semibold text-gray-700 mb-2">
               默认下载路径
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 id="download-path-input"
                 name="downloadPath"
@@ -422,7 +484,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* Max Retries */}
             <div>
               <NumberInput
@@ -497,7 +559,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div>
               <div className="text-sm font-semibold text-gray-700">本地 Whisper 配置</div>
               <p className="text-xs text-gray-400 mt-1">
-                这里配置本地 Whisper 服务地址和默认模型，保存后会写入 `config/settings.json`。
+                这里配置本地 Whisper 服务地址和字幕工作流参数。当前 Docker 集成模式下，实际下载和运行的 Whisper 模型由应用自动生成的 `config/whisper.env` 决定。
               </p>
             </div>
 
@@ -510,32 +572,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 name="subtitleLocalWhisperUrl"
                 type="text"
                 value={settings.subtitleLocalWhisperUrl}
-                onChange={(e) => setSettings({ ...settings, subtitleLocalWhisperUrl: e.target.value })}
+                onChange={(e) => {
+                  setSettings({ ...settings, subtitleLocalWhisperUrl: e.target.value });
+                  setSaveMessage('');
+                }}
                 placeholder="http://127.0.0.1:9001"
                 className={`w-full px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.subtitleLocalWhisperUrl ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'}`}
               />
               {errors.subtitleLocalWhisperUrl && (
                 <p className="mt-1.5 text-xs text-red-500">{errors.subtitleLocalWhisperUrl}</p>
               )}
+              <p className="mt-1.5 text-xs text-gray-400">
+                如果后端跑在 Docker 里，而 Whisper 跑在另一台机器或另一个容器，这里不要填 `127.0.0.1`，应填实际 IP、`host.docker.internal` 或目标容器名。
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="subtitle-local-model" className="block text-sm font-semibold text-gray-700 mb-2">
-                  默认模型
+                  模型标识
                 </label>
-                <input
+                <select
                   id="subtitle-local-model"
                   name="subtitleLocalModel"
-                  type="text"
                   value={settings.subtitleLocalModel}
-                  onChange={(e) => setSettings({ ...settings, subtitleLocalModel: e.target.value })}
-                  placeholder="medium"
+                  onChange={(e) => {
+                    setSettings({ ...settings, subtitleLocalModel: e.target.value });
+                    setSaveMessage('');
+                  }}
                   className={`w-full px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.subtitleLocalModel ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'}`}
-                />
+                >
+                  {whisperModelOptions.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
                 {errors.subtitleLocalModel && (
                   <p className="mt-1.5 text-xs text-red-500">{errors.subtitleLocalModel}</p>
                 )}
+                <p className="mt-1.5 text-xs text-gray-400">
+                  Docker 集成的 Whisper 现已默认下载 `medium`。修改这里并保存后，应用会同步写入 `config/whisper.env`。重启 `whisper` 容器后，新模型会开始下载并生效。
+                </p>
               </div>
 
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mt-8">
@@ -548,7 +626,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </label>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-4">
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={settings.subtitleAutoGenerateOnUpload}
+                  onChange={(e) => setSettings({ ...settings, subtitleAutoGenerateOnUpload: e.target.checked })}
+                />
+                上传到 WebDAV 后自动生成字幕
+              </label>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={settings.subtitleAutoBurnAfterGenerate}
+                  onChange={(e) => setSettings({ ...settings, subtitleAutoBurnAfterGenerate: e.target.checked })}
+                />
+                生成字幕后自动烧录内嵌字幕视频
+              </label>
+              <p className="text-xs text-gray-500">
+                自动工作流会复用当前 Whisper 配置；如果同时启用了 WebDAV 上传，生成的字幕、JSON、WAV 和烧录视频会一起联动上传。
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="subtitle-mode" className="block text-sm font-semibold text-gray-700 mb-2">
+                  字幕输出模式
+                </label>
+                <select
+                  id="subtitle-mode"
+                  name="subtitleMode"
+                  value={settings.subtitleMode}
+                  onChange={(e) => setSettings({ ...settings, subtitleMode: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                >
+                  {subtitleModeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label htmlFor="subtitle-language" className="block text-sm font-semibold text-gray-700 mb-2">
                   语言代码
@@ -591,11 +709,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {isTestingSubtitleApi ? <Loader2 size={16} className="animate-spin" /> : <TestTube2 size={16} />}
               测试本地 Whisper
             </button>
+
+            <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-gray-700">Whisper 状态</div>
+                <button
+                  onClick={loadWhisperStatus}
+                  disabled={isLoadingWhisperStatus}
+                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 disabled:opacity-50"
+                >
+                  {isLoadingWhisperStatus ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  刷新
+                </button>
+              </div>
+              <div className="text-sm text-gray-600 space-y-1">
+                <div>目标模型: {whisperStatus?.desired_model || settings.subtitleLocalModel}</div>
+                <div>当前模型: {whisperStatus?.current_model || '未知'}</div>
+                <div>容器状态: {whisperStatus?.container_running ? '运行中' : '未运行'}</div>
+                <div>健康状态: {whisperStatus?.container_health || (whisperStatus?.ready ? 'healthy' : 'unknown')}</div>
+                <div>服务状态: {whisperStatus?.downloading ? '下载中 / 加载中' : whisperStatus?.ready ? '就绪' : '未就绪'}</div>
+              </div>
+              <div className="text-xs text-gray-500">
+                {whisperStatus?.message || '加载中...'}
+              </div>
+              <button
+                onClick={handleRestartWhisper}
+                disabled={isRestartingWhisper}
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isRestartingWhisper ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                应用模型并重启 Whisper
+              </button>
+            </div>
+            {saveMessage && (
+              <div className={`rounded-xl px-4 py-3 text-sm ${saveMessage.startsWith('保存失败') ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
+                {saveMessage}
+              </div>
+            )}
           </div>
 
         </div>
 
-        <div className="px-6 py-4 bg-gray-50/50 border-t border-gray-100 flex justify-end gap-3">
+        <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50/50 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
           <button
             onClick={onClose}
             className="px-5 py-2.5 rounded-xl text-gray-600 font-medium hover:bg-gray-200 transition-colors text-sm"

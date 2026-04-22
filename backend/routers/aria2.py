@@ -8,7 +8,7 @@ import os
 import threading
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel
 
@@ -57,7 +57,7 @@ class StartResponse(BaseModel):
 
 
 @router.get("/config", response_model=Aria2ConfigResponse)
-def get_aria2_config() -> Dict[str, Any]:
+def get_aria2_config(request: Request) -> Dict[str, Any]:
     """
     获取 Aria2 配置信息
 
@@ -67,11 +67,11 @@ def get_aria2_config() -> Dict[str, Any]:
     user_secret = settings.get("aria2Secret", ARIA2_DEFAULTS["SECRET"])
     default_secret = ARIA2_DEFAULTS["SECRET"] if not user_secret else user_secret
 
-    return {
-        "host": settings.get("aria2Host", ARIA2_DEFAULTS["HOST"]),
-        "port": settings.get("aria2Port", ARIA2_DEFAULTS["PORT"]),
-        "secret": default_secret,
-    }
+    request_host = request.url.hostname or settings.get("aria2Host", ARIA2_DEFAULTS["HOST"])
+    public_host = os.getenv("DOUYIN_ARIA2_PUBLIC_HOST", "").strip() or request_host
+    public_port = int(os.getenv("DOUYIN_ARIA2_PUBLIC_PORT", settings.get("aria2Port", ARIA2_DEFAULTS["PORT"])))
+
+    return {"host": public_host, "port": public_port, "secret": default_secret}
 
 
 @router.get("/status", response_model=Aria2StatusResponse)
@@ -102,6 +102,12 @@ def start_aria2() -> Dict[str, str]:
 
     if not state.aria2_manager:
         raise HTTPException(status_code=500, detail="Aria2 管理器未初始化")
+
+    try:
+        if state.aria2_manager._check_connection():
+            return {"status": "success", "message": "Aria2 服务已就绪"}
+    except Exception:
+        pass
 
     def start_aria2_async():
         try:

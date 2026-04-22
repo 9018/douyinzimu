@@ -21,9 +21,10 @@ import { DouyinWork, TaskType } from './types';
 import {
   ChevronDown, ChevronUp,
   Infinity as InfinityIcon, Layers,
-  Loader2,
+  Loader2, Menu, PanelLeftOpen, Settings,
   Search,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
 import memoize from 'memoize-one';
 import AutoSizer from 'react-virtualized-auto-sizer';
@@ -39,6 +40,8 @@ interface RowData {
   items: DouyinWork[];                          // 作品列表
   columnCount: number;                          // 每行列数
   width: number;                                // 容器宽度
+  horizontalPadding: number;
+  gap: number;
   onClick: (work: DouyinWork) => void;          // 点击作品的回调
 }
 
@@ -51,21 +54,27 @@ const createItemData = memoize(
     items: DouyinWork[],
     columnCount: number,
     width: number,
+    horizontalPadding: number,
+    gap: number,
     onClick: (work: DouyinWork) => void
   ) => ({
     items,
     columnCount,
     width,
+    horizontalPadding,
+    gap,
     onClick,
   }),
   // 自定义比较函数
   (newArgs, oldArgs) => {
-    const [newItems, newColumnCount, newWidth, newOnClick] = newArgs;
-    const [oldItems, oldColumnCount, oldWidth, oldOnClick] = oldArgs;
+    const [newItems, newColumnCount, newWidth, newHorizontalPadding, newGap, newOnClick] = newArgs;
+    const [oldItems, oldColumnCount, oldWidth, oldHorizontalPadding, oldGap, oldOnClick] = oldArgs;
 
     // 基本类型比较
     if (newColumnCount !== oldColumnCount) return false;
     if (newWidth !== oldWidth) return false;
+    if (newHorizontalPadding !== oldHorizontalPadding) return false;
+    if (newGap !== oldGap) return false;
     if (newOnClick !== oldOnClick) return false;
     if (newItems !== oldItems) return false;
 
@@ -96,16 +105,12 @@ const getColumnCount = (width: number) => {
  * @param data 行数据（包含作品列表和回调函数）
  */
 const Row = ({ index, style, data }: { index: number; style: React.CSSProperties; data: RowData }) => {
-  const { items, columnCount, width, onClick } = data;
+  const { items, columnCount, width, horizontalPadding, gap, onClick } = data;
   const startIndex = index * columnCount;
 
-  // 计算每列的宽度以实现响应式布局
-  // 容器左右padding为p-8（32px * 2 = 64px）
-  const availableWidth = width - 64;
-  const gap = 12; // 进一步减小列间距
+  const availableWidth = Math.max(width - horizontalPadding * 2, width / 2);
   const itemWidth = (availableWidth - (gap * (columnCount - 1))) / columnCount;
 
-  // 获取当前行的作品列表
   const rowItems = [];
   for (let i = 0; i < columnCount; i++) {
     const itemIndex = startIndex + i;
@@ -115,17 +120,25 @@ const Row = ({ index, style, data }: { index: number; style: React.CSSProperties
   }
 
   return (
-    <div style={style} className="flex gap-3 px-8 box-border">
-      {rowItems.map((work: DouyinWork) => (
-        <div key={work.id} style={{ width: itemWidth }}>
-          <WorkCard
-            work={work}
-            onClick={onClick}
-          />
-        </div>
-      ))}
+    <div style={style} className="box-border">
+      <div className="flex box-border" style={{ gap: `${gap}px`, paddingLeft: `${horizontalPadding}px`, paddingRight: `${horizontalPadding}px` }}>
+        {rowItems.map((work: DouyinWork) => (
+          <div key={work.id} style={{ width: itemWidth }}>
+            <WorkCard
+              work={work}
+              onClick={onClick}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
+};
+
+const getGridMetrics = (width: number) => {
+  if (width >= 1280) return { horizontalPadding: 32, gap: 12 };
+  if (width >= 768) return { horizontalPadding: 24, gap: 12 };
+  return { horizontalPadding: 16, gap: 10 };
 };
 
 /**
@@ -133,6 +146,8 @@ const Row = ({ index, style, data }: { index: number; style: React.CSSProperties
  * 负责整体布局、任务采集、数据展示和下载管理
  */
 export const App: React.FC = () => {
+  const appBuildLabel = `v${__APP_VERSION__} · ${__APP_BUILD_TIME__}`;
+
   // --- 任务相关状态 ---
   const [activeTab, setActiveTab] = useState<TaskType>(TaskType.POST);  // 当前选中的任务类型
   const [inputVal, setInputVal] = useState('');                              // 输入框的值
@@ -155,6 +170,8 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);  // 设置模态框是否打开
   const [showLogs, setShowLogs] = useState(false);  // 日志面板是否显示
   const [showWelcomeWizard, setShowWelcomeWizard] = useState(false);  // 欢迎向导是否显示
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(false);
 
   // --- 筛选相关状态 ---
   const [filters, setFilters] = useState<FilterSettings>({
@@ -208,12 +225,12 @@ export const App: React.FC = () => {
   const handleTabChange = useCallback((newTab: TaskType) => {
     if (newTab !== activeTab) {
       setActiveTab(newTab);
-      // 只有非下载管理页面才清空输入框
-      if (newTab !== TaskType.DOWNLOAD_MANAGER && newTab !== TaskType.VIDEO_TRANSFORM) {
+      if (newTab !== TaskType.DOWNLOAD_MANAGER && newTab !== TaskType.VIDEO_TRANSFORM && newTab !== TaskType.VIDEO_TRANSFORM_MOBILE) {
         setInputVal('');
       }
       logger.info(`手动切换任务模式: ${newTab}`);
     }
+    setIsMobileSidebarOpen(false);
   }, [activeTab]);
 
   /**
@@ -241,6 +258,17 @@ export const App: React.FC = () => {
     }
     return undefined;
   }, [showLimitMenu]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   /**
    * 初始化系统和检查首次运行
@@ -525,6 +553,9 @@ export const App: React.FC = () => {
    */
   const decrementMaxCount = () => setMaxCount(prev => Math.max(0, (prev || 0) - 1));
 
+  const mainContentBottomSpacing = showLogs ? 'mb-[40vh] lg:mb-64' : 'mb-0';
+  const logPanelLeftOffset = typeof window !== 'undefined' && window.innerWidth < 1024 ? 0 : (isDesktopSidebarCollapsed ? 0 : 256);
+
   return (
     <ErrorBoundary
       onError={(error, errorInfo) => {
@@ -533,34 +564,111 @@ export const App: React.FC = () => {
         console.error('错误详情:', error, errorInfo);
       }}
     >
-      <div className="flex h-screen bg-[#F8F9FB] overflow-hidden font-sans text-gray-900 selection:bg-blue-100 selection:text-blue-900">
-        <LightErrorBoundary fallbackMessage="侧边栏加载失败">
-          <Sidebar
-            activeTab={activeTab}
-            setActiveTab={handleTabChange}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            showLogs={showLogs}
-            setShowLogs={setShowLogs}
-            isDownloading={isDownloading}
-            downloadStats={downloadStats}
-          />
-        </LightErrorBoundary>
+      <div className="flex min-h-screen bg-[#F8F9FB] overflow-x-hidden font-sans text-gray-900 selection:bg-blue-100 selection:text-blue-900 lg:h-screen lg:overflow-hidden">
+        {!isDesktopSidebarCollapsed && (
+          <div className="hidden lg:block h-full">
+            <LightErrorBoundary fallbackMessage="侧边栏加载失败">
+              <Sidebar
+                activeTab={activeTab}
+                setActiveTab={handleTabChange}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                showLogs={showLogs}
+                setShowLogs={setShowLogs}
+                isDownloading={isDownloading}
+                downloadStats={downloadStats}
+                mode="desktop"
+                onToggleDesktopCollapsed={() => setIsDesktopSidebarCollapsed(true)}
+              />
+            </LightErrorBoundary>
+          </div>
+        )}
 
-        {/* 根据activeTab显示不同的主内容区域 */}
-        {activeTab === TaskType.DOWNLOAD_MANAGER ? (
-          <LightErrorBoundary fallbackMessage="下载面板加载失败">
-            <DownloadPanel isOpen={true} showLogs={showLogs} />
-          </LightErrorBoundary>
-        ) : activeTab === TaskType.FILE_MANAGER || activeTab === TaskType.VIDEO_TRANSFORM ? (
-          <LightErrorBoundary fallbackMessage="视频转码面板加载失败">
-            <VideoTransformPanel />
-          </LightErrorBoundary>
-        ) : (
-          <main className="flex-1 flex flex-col min-w-0 relative">
-            {/* Sticky Header */}
-            <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200/60 shadow-sm transition-all">
-              <div className="max-w-7xl mx-auto w-full px-8 py-5">
-                {(activeTab as TaskType) !== TaskType.DOWNLOAD_MANAGER && (activeTab as TaskType) !== TaskType.VIDEO_TRANSFORM && (
+        {isMobileSidebarOpen && (
+          <div className="fixed inset-0 z-[55] bg-slate-950/50 backdrop-blur-[1px] lg:hidden" onClick={() => setIsMobileSidebarOpen(false)}>
+            <div className="h-full w-72 max-w-[82vw]" onClick={(e) => e.stopPropagation()}>
+              <LightErrorBoundary fallbackMessage="侧边栏加载失败">
+                <Sidebar
+                  activeTab={activeTab}
+                  setActiveTab={handleTabChange}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  showLogs={showLogs}
+                  setShowLogs={setShowLogs}
+                  isDownloading={isDownloading}
+                  downloadStats={downloadStats}
+                  mode="mobile"
+                  onClose={() => setIsMobileSidebarOpen(false)}
+                />
+              </LightErrorBoundary>
+            </div>
+          </div>
+        )}
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="sticky top-0 z-40 border-b border-gray-200/70 bg-white/90 backdrop-blur-md lg:hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsMobileSidebarOpen(true)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  title="打开菜单"
+                >
+                  <Menu size={18} />
+                </button>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-900">
+                    {activeTab === TaskType.SEARCH ? '关键词搜索' : activeTab === TaskType.DOWNLOAD_MANAGER ? '下载管理' : activeTab === TaskType.FILE_MANAGER ? '文件管理' : activeTab === TaskType.VIDEO_TRANSFORM_MOBILE ? '字幕工坊移动版' : activeTab === TaskType.VIDEO_TRANSFORM ? '字幕工坊' : '数据采集'}
+                  </div>
+                  <div className="text-xs text-slate-500">Douyin Crawler Tool</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowLogs(!showLogs)}
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border transition ${showLogs ? 'border-emerald-200 bg-emerald-50 text-emerald-600' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                  title="运行日志"
+                >
+                  {showLogs ? <X size={18} /> : <PanelLeftOpen size={18} />}
+                </button>
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50"
+                  title="系统配置"
+                >
+                  <Settings size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {isDesktopSidebarCollapsed && (
+            <button
+              onClick={() => setIsDesktopSidebarCollapsed(false)}
+              className="hidden lg:inline-flex fixed left-4 top-4 z-40 h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white/90 text-slate-700 shadow-lg backdrop-blur transition hover:bg-white"
+              title="展开菜单"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
+          )}
+
+          {/* 根据activeTab显示不同的主内容区域 */}
+          {activeTab === TaskType.DOWNLOAD_MANAGER ? (
+            <LightErrorBoundary fallbackMessage="下载面板加载失败">
+              <DownloadPanel isOpen={true} showLogs={showLogs} />
+            </LightErrorBoundary>
+          ) : activeTab === TaskType.FILE_MANAGER ? (
+            <LightErrorBoundary fallbackMessage="视频转码面板加载失败">
+              <VideoTransformPanel mode="file-manager" />
+            </LightErrorBoundary>
+          ) : activeTab === TaskType.VIDEO_TRANSFORM || activeTab === TaskType.VIDEO_TRANSFORM_MOBILE ? (
+            <LightErrorBoundary fallbackMessage="字幕工坊面板加载失败">
+              <VideoTransformPanel mode={activeTab === TaskType.VIDEO_TRANSFORM_MOBILE ? "subtitle-workshop-mobile" : "subtitle-workshop"} />
+            </LightErrorBoundary>
+          ) : (
+            <main className="flex-1 flex flex-col min-w-0 relative">
+              {/* Sticky Header */}
+              <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200/60 shadow-sm transition-all">
+                <div className="max-w-7xl mx-auto w-full px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
+                {(activeTab as TaskType) !== TaskType.DOWNLOAD_MANAGER && (activeTab as TaskType) !== TaskType.VIDEO_TRANSFORM && (activeTab as TaskType) !== TaskType.VIDEO_TRANSFORM_MOBILE && (
                   <>
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 tracking-tight">
                       {activeTab === TaskType.SEARCH && <Search size={24} className="text-blue-500" />}
@@ -568,7 +676,7 @@ export const App: React.FC = () => {
                     </h2>
 
                     {/* 搜索框 */}
-                    <div className="flex gap-3">
+                    <div className="flex flex-col gap-3 lg:flex-row">
                       <div className="flex-1">
                         <div className={`relative flex group shadow-sm rounded-xl border transition-all bg-white z-20 ${inputError ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500'
                           }`}>
@@ -659,7 +767,7 @@ export const App: React.FC = () => {
                           {/* Max Count Dropdown Trigger - 仅在非单个作品采集时显示 */}
                           {activeTab !== TaskType.AWEME && (
                             <>
-                              <div className="relative border-l border-gray-100" ref={limitMenuRef}>
+                              <div className="relative border-t border-gray-100 lg:border-l lg:border-t-0" ref={limitMenuRef}>
                                 <button
                                   onClick={() => setShowLimitMenu(!showLimitMenu)}
                                   className="h-full px-4 flex items-center gap-2 hover:bg-gray-50 transition-colors text-sm font-medium text-gray-600 outline-none"
@@ -752,7 +860,7 @@ export const App: React.FC = () => {
                       <button
                         onClick={handleSearch}
                         disabled={isLoading || !inputVal.trim()}
-                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-8 py-3.5 rounded-xl font-medium shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed disabled:shadow-none flex items-center gap-2 z-20"
+                        className="z-20 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3.5 font-medium text-white shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 disabled:shadow-none lg:w-auto lg:px-8"
                       >
                         {isLoading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
                         {isLoading ? '采集中...' : '开始采集'}
@@ -765,7 +873,7 @@ export const App: React.FC = () => {
 
             {/* Action Bar */}
             {results.length > 0 && resultsTaskType === activeTab && (
-              <div className="px-8 py-3 border-b border-gray-200 bg-white/50 backdrop-blur-sm flex items-center justify-between sticky top-[120px] z-20">
+              <div className="sticky top-0 lg:top-[120px] z-20 flex flex-col gap-3 border-b border-gray-200 bg-white/50 px-4 py-3 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
                 <div className="flex items-center gap-4 text-sm text-gray-600">
                   <span className="font-semibold bg-gray-100 px-2 py-1 rounded text-gray-700">共 {results.length} 个作品</span>
                 </div>
@@ -788,7 +896,7 @@ export const App: React.FC = () => {
             )}
 
             {/* Content Area with Virtual Scroll */}
-            <div className={`flex-1 transition-all duration-300 ${showLogs ? 'mb-64' : 'mb-0'}`}>
+            <div className={`flex-1 transition-all duration-300 ${mainContentBottomSpacing}`}>
               {(results.length === 0 || resultsTaskType !== activeTab) && !isLoading ? (
                 // 空状态：等待任务开始
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
@@ -837,13 +945,15 @@ export const App: React.FC = () => {
                       const columnCount = getColumnCount(width);
                       const rowCount = Math.ceil(results.length / columnCount);
                       // 调整行高，增加行间距
+                      const { horizontalPadding, gap } = getGridMetrics(width);
                       const itemHeight = 296;
 
-                      // Create item data bundle (memoized)
                       const itemData = createItemData(
                         results,
                         columnCount,
                         width,
+                        horizontalPadding,
+                        gap,
                         handleWorkClick
                       );
 
@@ -880,8 +990,9 @@ export const App: React.FC = () => {
           </main>
         )}
 
-        {/* 全局组件：Toast容器 - 在所有面板中都显示 */}
-        <ToastContainer />
+      </div>
+
+      <ToastContainer />
 
         {/* 全局组件：设置弹窗 */}
         <LightErrorBoundary fallbackMessage="设置面板加载失败">
@@ -890,7 +1001,7 @@ export const App: React.FC = () => {
 
         {/* 全局组件：日志面板 */}
         <LightErrorBoundary fallbackMessage="日志面板加载失败">
-          <LogPanel isOpen={showLogs} onToggle={() => setShowLogs(!showLogs)} />
+          <LogPanel isOpen={showLogs} onToggle={() => setShowLogs(!showLogs)} sidebarOffset={logPanelLeftOffset} />
         </LightErrorBoundary>
 
         {/* 欢迎向导 */}
@@ -905,6 +1016,10 @@ export const App: React.FC = () => {
             }}
           />
         </LightErrorBoundary>
+
+        <div className="pointer-events-none fixed right-3 bottom-3 z-[60] rounded-md border border-slate-200 bg-white/90 px-2 py-1 text-[11px] text-slate-500 shadow-sm backdrop-blur-sm">
+          {appBuildLabel}
+        </div>
       </div>
     </ErrorBoundary>
   );

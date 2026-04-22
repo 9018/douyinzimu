@@ -4,8 +4,15 @@ import path from "path";
 import { defineConfig } from "vite";
 
 export default defineConfig(() => {
+  const appVersion = process.env.npm_package_version || "dev";
+  const buildTime = new Date().toISOString().replace("T", " ").slice(0, 19);
+
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+      __APP_BUILD_TIME__: JSON.stringify(buildTime),
+    },
     root: ".", // 当前目录作为根目录
     build: {
       outDir: path.resolve(__dirname, "./dist"), // 输出到frontend/dist

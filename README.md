@@ -60,27 +60,32 @@
 ### Web 服务（Docker / 全平台）
 
 ```bash
-# 1) 可选：准备 .env（没有可先跳过）
-cp .env.example .env 2>/dev/null || true
-
-# 2) 生产模式（默认 compose.yaml）
+# 1) 根目录一套编排启动全部服务（默认 compose.yaml）
 docker compose up -d --build
 
-# 3) 查看日志
+# 2) 查看日志
 docker compose logs -f douyin
+docker compose logs -f whisper
 ```
 
-浏览器访问 `http://localhost:8000`
+运行配置统一放在 `config/`：
+- 应用配置：`config/settings.json`
+- Whisper 容器联动配置：`config/whisper.env`
+
+浏览器访问：
+- 主项目：`http://localhost:8001`
+- Whisper UI：`http://localhost:9001`
 
 
 > 容器启动时会先自动执行：
 > `aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all --dir=/app/download -D`
 > 然后再启动后端服务。
 
-#### Docker 双配置
+#### Docker 编排说明
 
-- `compose.yaml` / `compose.prod.yaml`：生产模式（仅映射配置和下载目录）
-- `compose.dev.yaml`：开发模式（映射前后端源码 + 配置 + 下载目录）
+- `compose.yaml`：默认入口，直接启动整个项目
+- `compose.prod.yaml`：显式生产模式入口
+- `compose.dev.yaml`：开发模式入口
 
 ```bash
 # 开发模式（源码热修改）
@@ -97,12 +102,18 @@ docker compose -f compose.prod.yaml up -d --build
 - `./frontend -> /app/frontend`
 - `./config -> /app/config`
 - `./download -> /app/download`
+- `./whisper-asr/app -> whisper UI 自定义后端与页面`
+- `./whisper-asr/transcripts -> /data/transcripts`
+- `./whisper-asr/wavs -> /data/wavs`
 
 > 开发模式首次启动如果检测到 `frontend/dist` 不存在，会在容器中自动执行 `pnpm build`。
 
 **生产模式（compose.yaml / compose.prod.yaml）**
 - `./config -> /app/config`
 - `./download -> /app/download`
+- `./whisper-asr/transcripts -> /data/transcripts`
+- `./whisper-asr/wavs -> /data/wavs`
+- `./whisper-asr/app -> whisper UI 自定义后端与页面`
 
 # 或手动启动（非 Docker）
 ```bash

@@ -38,8 +38,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libwebkit2gtk-4.1-dev \
     libglib2.0-dev \
     aria2 \
+    docker.io \
     ffmpeg \
+    fontconfig \
+    fonts-noto-cjk \
+    fonts-wqy-zenhei \
     tzdata \
+    && fc-cache -f -v \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone

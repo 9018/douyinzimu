@@ -8,12 +8,14 @@ import {
   Hash,
   Heart,
   Layers,
+  Menu,
   Music,
   Search,
   Settings,
   Star,
   Terminal,
-  User
+  User,
+  X
 } from 'lucide-react';
 import React from 'react';
 import { bridge } from '../services/bridge';
@@ -31,6 +33,9 @@ interface SidebarProps {
     activeCount: number;
     downloadSpeed: number;
   };
+  mode?: 'desktop' | 'mobile';
+  onClose?: () => void;
+  onToggleDesktopCollapsed?: () => void;
 }
 
 const menuItems = [
@@ -46,8 +51,29 @@ const menuItems = [
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab, setActiveTab, onOpenSettings, showLogs, setShowLogs,
-  isDownloading, downloadStats
+  isDownloading, downloadStats, mode = 'desktop', onClose, onToggleDesktopCollapsed
 }) => {
+  const handleTabChange = (tab: TaskType) => {
+    setActiveTab(tab);
+    if (mode === 'mobile') {
+      onClose?.();
+    }
+  };
+
+  const handleOpenSettings = () => {
+    onOpenSettings();
+    if (mode === 'mobile') {
+      onClose?.();
+    }
+  };
+
+  const handleToggleLogs = () => {
+    setShowLogs(!showLogs);
+    if (mode === 'mobile') {
+      onClose?.();
+    }
+  };
+
   return (
     <div className="w-64 bg-slate-900 text-white flex flex-col h-full shadow-2xl relative z-50">
       {/* Brand */}
@@ -55,10 +81,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
           <span className="font-bold text-white text-xl">D</span>
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold tracking-wide">Douyin</h1>
           <div className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider">Crawler Tool</div>
         </div>
+        {mode === 'mobile' ? (
+          <button
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-800/70 text-slate-200 transition hover:bg-slate-700"
+            title="关闭菜单"
+          >
+            <X size={18} />
+          </button>
+        ) : (
+          <button
+            onClick={onToggleDesktopCollapsed}
+            className="hidden lg:inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-800/70 text-slate-200 transition hover:bg-slate-700"
+            title="隐藏菜单"
+          >
+            <Menu size={18} />
+          </button>
+        )}
       </div>
 
       {/* Navigation */}
@@ -74,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <li key={item.id}>
                 <button
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => handleTabChange(item.id)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group ${isActive
                       ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
                       : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
@@ -94,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-4 bg-slate-950/30 border-t border-slate-800 space-y-1">
         {/* 下载管理 */}
         <button
-          onClick={() => setActiveTab(TaskType.DOWNLOAD_MANAGER)}
+          onClick={() => handleTabChange(TaskType.DOWNLOAD_MANAGER)}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${activeTab === TaskType.DOWNLOAD_MANAGER
               ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
               : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -118,7 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveTab(TaskType.VIDEO_TRANSFORM)}
+          onClick={() => handleTabChange(TaskType.VIDEO_TRANSFORM)}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${activeTab === TaskType.VIDEO_TRANSFORM
               ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
               : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -130,7 +173,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveTab(TaskType.FILE_MANAGER)}
+          onClick={() => handleTabChange(TaskType.VIDEO_TRANSFORM_MOBILE)}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${activeTab === TaskType.VIDEO_TRANSFORM_MOBILE
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+        >
+          <Captions size={18} className={activeTab === TaskType.VIDEO_TRANSFORM_MOBILE ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'} />
+          <span className="font-medium flex-1 text-left">字幕工坊移动版</span>
+          {activeTab === TaskType.VIDEO_TRANSFORM_MOBILE ? <div className="w-1.5 h-1.5 bg-white rounded-full opacity-50"></div> : null}
+        </button>
+
+        <button
+          onClick={() => handleTabChange(TaskType.FILE_MANAGER)}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${activeTab === TaskType.FILE_MANAGER
               ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20'
               : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -145,7 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* 运行日志 */}
         <button
-          onClick={() => setShowLogs(!showLogs)}
+          onClick={handleToggleLogs}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${showLogs ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
         >
@@ -157,7 +212,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="h-px bg-slate-800 my-2"></div>
 
         <button
-          onClick={onOpenSettings}
+          onClick={handleOpenSettings}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-all duration-200 group"
         >
           <Settings size={18} className="text-slate-500 group-hover:text-slate-300" />

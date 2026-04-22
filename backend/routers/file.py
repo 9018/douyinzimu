@@ -18,17 +18,29 @@ import requests
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
+from opencc import OpenCC
 from pydantic import BaseModel
 
-from ..constants import DOWNLOAD_DIR
+from ..constants import DEFAULT_SETTINGS, DOWNLOAD_DIR
 from ..lib.webdav_client import WebDAVClient
 from ..settings import settings
 
 router = APIRouter(prefix="/api/file", tags=["文件操作"])
+opencc_t2s = OpenCC("t2s")
 
 # 允许的媒体文件扩展名
 ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm", ".jpg", ".jpeg", ".png", ".gif", ".webp"}
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+PREVIEW_FONT_FILES = {
+    "WenQuanYi Zen Hei": "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "Noto Sans CJK SC": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "Noto Sans CJK TC": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "Noto Sans CJK JP": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "Source Han Sans SC": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "Microsoft YaHei": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "PingFang SC": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "Arial Unicode MS": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+}
 
 
 
@@ -102,7 +114,9 @@ class TransformVideoRequest(BaseModel):
     file_path: str
     ffmpeg_args: str = ""
     generate_subtitles: bool = False
+    auto_burn_subtitles: bool = False
     subtitle_language: Optional[str] = None
+    subtitle_mode: Optional[str] = None
     subtitle_prompt: Optional[str] = None
 
 
@@ -114,6 +128,7 @@ class TransformVideoResponse(BaseModel):
     subtitle_path: Optional[str] = None
     subtitle_json_path: Optional[str] = None
     subtitle_wav_path: Optional[str] = None
+    burned_video_path: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -122,6 +137,7 @@ class GenerateSubtitleRequest(BaseModel):
 
     file_path: str
     subtitle_language: Optional[str] = None
+    subtitle_mode: Optional[str] = None
     subtitle_prompt: Optional[str] = None
 
 
@@ -132,6 +148,7 @@ class GenerateSubtitleResponse(BaseModel):
     subtitle_path: Optional[str] = None
     subtitle_json_path: Optional[str] = None
     subtitle_wav_path: Optional[str] = None
+    burned_video_path: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -161,7 +178,7 @@ class SubtitleFileResponse(BaseModel):
 class BurnSubtitleRequest(BaseModel):
     video_path: str
     subtitle_path: str
-    font_name: str = "Noto Sans CJK SC"
+    font_name: str = "WenQuanYi Zen Hei"
     font_size: int = 18
     margin_v: int = 24
     outline: int = 2
@@ -169,6 +186,9 @@ class BurnSubtitleRequest(BaseModel):
     primary_color: str = "&H00FFFFFF"
     outline_color: str = "&H00000000"
     alignment: int = 2
+    use_precise_position: bool = False
+    position_x: Optional[float] = None
+    position_y: Optional[float] = None
 
 
 class BurnSubtitleResponse(BaseModel):
@@ -202,6 +222,11 @@ class UploadWebDAVResponse(BaseModel):
 
     success: bool
     remote_path: Optional[str] = None
+    subtitle_path: Optional[str] = None
+    subtitle_json_path: Optional[str] = None
+    subtitle_wav_path: Optional[str] = None
+    burned_video_path: Optional[str] = None
+    remote_artifacts: Dict[str, str] = {}
     error: Optional[str] = None
 
 
@@ -360,6 +385,23 @@ def _relative_to_download_dir(download_dir: str, abs_path: str) -> str:
     return os.path.relpath(abs_path, download_dir).replace("\\", "/")
 
 
+def _resolve_local_operation_path(path: str) -> str:
+    candidate = (path or "").strip()
+    if not candidate:
+        raise HTTPException(status_code=400, detail="路径不能为空")
+
+    download_dir = _get_download_dir()
+    if os.path.isabs(candidate):
+        abs_path = os.path.abspath(candidate)
+    else:
+        abs_path = os.path.abspath(os.path.join(download_dir, candidate))
+
+    if not _is_safe_path(download_dir, abs_path):
+        raise HTTPException(status_code=400, detail="路径超出下载目录，禁止操作")
+
+    return abs_path
+
+
 def _is_webdav_enabled_for(category: str) -> bool:
     if not settings.get("webdavEnabled", False):
         return False
@@ -420,7 +462,370 @@ def _normalize_local_whisper_url(base_url: str) -> str:
 
 
 def _normalize_local_whisper_models_url(base_url: str) -> str:
-    return f"{_normalize_local_whisper_url(base_url)}/models"
+    normalized = _normalize_local_whisper_url(base_url)
+    return f"{normalized}/models"
+
+
+def _build_whisper_connection_error(detail: Exception, whisper_url: str) -> str:
+    target = _normalize_local_whisper_url(whisper_url)
+    target_host = requests.utils.urlparse(target).hostname or whisper_url
+    base_message = f"本地 Whisper 请求失败: {detail}"
+
+    if "Connection refused" in str(detail) or "[Errno 111]" in str(detail):
+        return (
+            f"{base_message}。当前配置地址 `{target}` 可以访问到主机，但目标端口没有服务在监听。"
+            " 请确认 Whisper 服务已经启动，并且地址/端口填写正确。"
+            f" 如果后端运行在 Docker 容器内，`127.0.0.1` 指向容器自身；宿主机服务通常应改成宿主机实际 IP、"
+            " `host.docker.internal`，或直接改成目标容器名。"
+        )
+
+    if target_host == "host.docker.internal":
+        return (
+            f"{base_message}。当前正在使用 `host.docker.internal`，这通常表示要访问宿主机上的 Whisper 服务。"
+            " 如果你的 Whisper 并不在宿主机，而是在另一个 Docker 容器里，请把地址改成那个容器名加端口。"
+        )
+
+    return base_message
+
+
+def _build_whisper_transcriptions_url(base_url: str) -> str:
+    normalized = _normalize_local_whisper_url(base_url)
+    return f"{normalized}/transcribe"
+
+
+def _build_whisper_transcribe_path_url(base_url: str) -> str:
+    normalized = _normalize_local_whisper_url(base_url)
+    return f"{normalized}/api/transcribe-path"
+
+
+def _build_shared_whisper_source_path(source_path: str) -> Optional[str]:
+    download_dir = _get_download_dir()
+    abs_source = os.path.abspath(source_path)
+    if not _is_safe_path(download_dir, abs_source):
+        return None
+
+    relative_path = os.path.relpath(abs_source, download_dir).replace("\\", "/")
+    if relative_path.startswith("../"):
+        return None
+    return f"/data/uploads/{relative_path}"
+
+
+def _transcribe_with_local_whisper(
+    source_path: str,
+    whisper_url: str,
+    model: str,
+    task: str,
+    word_timestamps: bool,
+    language: Optional[str],
+    prompt: Optional[str],
+) -> Dict[str, Any]:
+    request_url = _build_whisper_transcriptions_url(whisper_url)
+    data: list[tuple[str, str]] = [
+        ("task", task),
+        ("model", model),
+    ]
+    data.append(("word_timestamps", "true" if word_timestamps else "false"))
+    if language:
+        data.append(("language", language))
+    if prompt:
+        data.append(("initial_prompt", prompt))
+
+    content_type = mimetypes.guess_type(source_path)[0] or "application/octet-stream"
+    with open(source_path, "rb") as f:
+        files = {"file": (os.path.basename(source_path), f, content_type)}
+        response = requests.post(request_url, data=data, files=files, timeout=600)
+
+    if response.status_code >= 400:
+        detail = response.text.strip() or f"HTTP {response.status_code}"
+        raise HTTPException(status_code=500, detail=f"本地 Whisper 字幕生成失败: {detail}")
+
+    try:
+        transcript = response.json()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"本地 Whisper 返回的不是 JSON: {e}")
+
+    transcript.setdefault("model", model)
+    return transcript
+
+
+def _transcribe_with_local_whisper_by_path(
+    source_path: str,
+    whisper_url: str,
+    model: str,
+    task: str,
+    word_timestamps: bool,
+    language: Optional[str],
+    prompt: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    shared_source_path = _build_shared_whisper_source_path(source_path)
+    if not shared_source_path:
+        return None
+
+    request_url = _build_whisper_transcribe_path_url(whisper_url)
+    data: list[tuple[str, str]] = [
+        ("path", shared_source_path),
+        ("task", task),
+        ("model", model),
+        ("word_timestamps", "true" if word_timestamps else "false"),
+    ]
+    if language:
+        data.append(("language", language))
+    if prompt:
+        data.append(("initial_prompt", prompt))
+
+    response = requests.post(request_url, data=data, timeout=600)
+    if response.status_code in {400, 403, 404, 422}:
+        return None
+    if response.status_code >= 400:
+        detail = response.text.strip() or f"HTTP {response.status_code}"
+        raise HTTPException(status_code=500, detail=f"本地 Whisper 字幕生成失败: {detail}")
+
+    try:
+        transcript = response.json()
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=f"本地 Whisper 返回的不是 JSON: {e}")
+
+    transcript.setdefault("model", model)
+    return transcript
+
+
+def _upload_workflow_outputs(
+    abs_paths: Dict[str, Optional[str]],
+    category: str,
+    client: Optional[WebDAVClient] = None,
+    remote_dir: Optional[str] = None,
+) -> Dict[str, str]:
+    remote_artifacts: Dict[str, str] = {}
+    for key, path in abs_paths.items():
+        if not path:
+            continue
+        try:
+            remote_artifacts[key] = _upload_to_webdav(
+                path,
+                category,
+                remote_dir=remote_dir,
+                client=client,
+            )
+        except Exception as e:
+            logger.error(f"✗ 上传工作流产物失败 [{key}]: {e}")
+    return remote_artifacts
+
+
+def _probe_video_resolution(video_path: str) -> tuple[int, int]:
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffprobe_path:
+        raise HTTPException(status_code=500, detail="未检测到 ffprobe，请先安装并加入 PATH")
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail="读取视频分辨率失败")
+
+    values = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(values) < 2:
+        raise HTTPException(status_code=500, detail="无法获取视频宽高")
+
+    try:
+        width = max(int(values[0]), 1)
+        height = max(int(values[1]), 1)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail="视频宽高解析失败") from e
+
+    return width, height
+
+
+def _srt_timestamp_to_ass(timestamp: str) -> str:
+    total_ms = _parse_srt_timestamp(timestamp)
+    hours = total_ms // 3600000
+    minutes = (total_ms % 3600000) // 60000
+    secs = (total_ms % 60000) // 1000
+    centis = (total_ms % 1000) // 10
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
+
+
+def _escape_ass_text(text: str) -> str:
+    return (
+        (text or "")
+        .replace("\\", r"\\")
+        .replace("{", r"\{")
+        .replace("}", r"\}")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", r"\N")
+    )
+
+
+def _build_precise_position_ass(
+    subtitle_path: str,
+    request: BurnSubtitleRequest,
+    video_width: int,
+    video_height: int,
+) -> str:
+    with open(subtitle_path, "r", encoding="utf-8-sig") as subtitle_file:
+        cues = _parse_srt_content(subtitle_file.read())
+
+    pos_x_percent = request.position_x if request.position_x is not None else 50
+    pos_y_percent = request.position_y if request.position_y is not None else 86
+    pos_x = int(round(max(0, min(100, pos_x_percent)) / 100 * video_width))
+    pos_y = int(round(max(0, min(100, pos_y_percent)) / 100 * video_height))
+    margin_x = max(int(round(video_width * 0.04)), 0)
+
+    primary_color = _normalize_ass_color(request.primary_color, "&H00FFFFFF")
+    outline_color = _normalize_ass_color(request.outline_color, "&H00000000")
+    style_line = ",".join(
+        [
+            "Default",
+            request.font_name.strip() or "WenQuanYi Zen Hei",
+            str(request.font_size),
+            primary_color,
+            primary_color,
+            outline_color,
+            "&H64000000",
+            "0",
+            "0",
+            "0",
+            "0",
+            "100",
+            "100",
+            "0",
+            "0",
+            "1",
+            str(request.outline),
+            str(request.shadow),
+            "5",
+            str(margin_x),
+            str(margin_x),
+            "0",
+            "1",
+        ]
+    )
+
+    ass_lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {video_width}",
+        f"PlayResY: {video_height}",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,"
+        "Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
+        "Alignment,MarginL,MarginR,MarginV,Encoding",
+        f"Style: {style_line}",
+        "",
+        "[Events]",
+        "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
+    ]
+
+    for cue in cues:
+        text = _escape_ass_text(str(cue.get("text", "")))
+        if not text:
+            continue
+        start = _srt_timestamp_to_ass(str(cue.get("start", "00:00:00,000")))
+        end = _srt_timestamp_to_ass(str(cue.get("end", "00:00:01,000")))
+        ass_lines.append(
+            f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\an5\\pos({pos_x},{pos_y})}}{text}"
+        )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ass", mode="w", encoding="utf-8") as ass_file:
+        ass_file.write("\n".join(ass_lines) + "\n")
+        return ass_file.name
+
+
+def _burn_subtitle_video(
+    input_video_path: str,
+    subtitle_path: str,
+    request: Optional[BurnSubtitleRequest] = None,
+) -> str:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise HTTPException(status_code=500, detail="未检测到 ffmpeg，请先安装并加入 PATH")
+
+    if request is None:
+        request = BurnSubtitleRequest(video_path="", subtitle_path="")
+
+    output_path = os.path.join(
+        os.path.dirname(input_video_path),
+        _build_burned_filename(os.path.basename(input_video_path)),
+    )
+
+    temp_ass_path: Optional[str] = None
+    style_parts = [
+        f"FontName={request.font_name.strip() or 'WenQuanYi Zen Hei'}",
+        f"FontSize={request.font_size}",
+        f"PrimaryColour={_normalize_ass_color(request.primary_color, '&H00FFFFFF')}",
+        f"OutlineColour={_normalize_ass_color(request.outline_color, '&H00000000')}",
+        "BorderStyle=1",
+        f"Outline={request.outline}",
+        f"Shadow={request.shadow}",
+        f"MarginV={request.margin_v}",
+        f"Alignment={request.alignment}",
+    ]
+    if request.use_precise_position and request.position_x is not None and request.position_y is not None:
+        video_width, video_height = _probe_video_resolution(input_video_path)
+        temp_ass_path = _build_precise_position_ass(subtitle_path, request, video_width, video_height)
+        subtitle_filter = f"ass='{_escape_subtitle_filter_path(temp_ass_path)}'"
+    else:
+        subtitle_filter = (
+            f"subtitles='{_escape_subtitle_filter_path(subtitle_path)}':"
+            "charenc=UTF-8:"
+            f"force_style='{','.join(style_parts)}'"
+        )
+
+    command = [
+        ffmpeg_path,
+        "-i",
+        input_video_path,
+        "-vf",
+        subtitle_filter,
+        "-c:a",
+        "copy",
+        "-y",
+        output_path,
+    ]
+    logger.info(f"开始烧录内嵌字幕: {' '.join(command)}")
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        output_lines: list[str] = []
+
+        if process.stdout is not None:
+            for line in process.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
+                output_lines.append(line)
+                logger.info(f"[ffmpeg-sub] {line}")
+
+        return_code = process.wait()
+        if return_code != 0:
+            error_msg = "\n".join(output_lines[-20:]) or "ffmpeg 执行失败"
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        return output_path
+    finally:
+        if temp_ass_path and os.path.exists(temp_ass_path):
+            try:
+                os.remove(temp_ass_path)
+            except OSError:
+                pass
 
 
 def _format_srt_timestamp(seconds: float) -> str:
@@ -434,6 +839,7 @@ def _format_srt_timestamp(seconds: float) -> str:
 
 def _build_srt_content(transcript: Dict[str, Any]) -> str:
     segments = transcript.get("segments") or []
+    raw_text = str(transcript.get("text", "")).strip()
     lines: list[str] = []
 
     for idx, segment in enumerate(segments, start=1):
@@ -454,18 +860,183 @@ def _build_srt_content(transcript: Dict[str, Any]) -> str:
     if lines:
         return "\n".join(lines).strip() + "\n"
 
-    text = str(transcript.get("text", "")).strip()
-    if not text:
-        return ""
+    if not raw_text:
+        available_keys = ", ".join(sorted(transcript.keys()))
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "本地 Whisper 未返回有效文本。"
+                f" 返回字段: {available_keys or '无'}。"
+                " 可能原因：音频被 VAD 全部过滤、模型没有识别到语音、或接口返回格式和当前解析逻辑不一致。"
+            ),
+        )
 
     return "\n".join(
         [
             "1",
             "00:00:00,000 --> 00:00:10,000",
-            text,
+            raw_text,
             "",
         ]
     )
+
+
+def _resolve_subtitle_mode(mode: Optional[str]) -> str:
+    value = (mode or settings.get("subtitleMode", DEFAULT_SETTINGS.get("subtitleMode", "zh")) or "zh").strip().lower()
+    if value in {"zh", "cn", "chinese"}:
+        return "zh"
+    if value in {"en", "english"}:
+        return "en"
+    if value in {"bilingual", "bi", "dual"}:
+        return "bilingual"
+    if value in {"mixed", "source", "auto", "origin", "original", "native"}:
+        return "mixed"
+    return "zh"
+
+
+def _resolve_subtitle_language(language: Optional[str]) -> Optional[str]:
+    value = (language or "").strip()
+    if not value:
+        return None
+    normalized = value.lower()
+    if normalized in {"auto", "detect", "auto-detect", "none", "null"}:
+        return None
+    return value
+
+
+def _resolve_subtitle_prompt(prompt: Optional[str]) -> str:
+    value = (prompt or "").strip()
+    if value == "请输出简体中文（简体字），不要使用繁体字。":
+        return ""
+    return value
+
+
+def _contains_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text or "")
+
+
+def _to_simplified_chinese(text: str) -> str:
+    value = (text or "").strip()
+    if not value or not _contains_cjk(value):
+        return value
+    return opencc_t2s.convert(value)
+
+
+def _normalize_transcript_texts(transcript: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(transcript)
+    normalized["text"] = _to_simplified_chinese(str(normalized.get("text", "")).strip())
+
+    segments = normalized.get("segments") or []
+    if isinstance(segments, list):
+        normalized_segments: list[Dict[str, Any]] = []
+        for segment in segments:
+            normalized_segment = dict(segment)
+            normalized_segment["text"] = _to_simplified_chinese(str(normalized_segment.get("text", "")).strip())
+            normalized_segments.append(normalized_segment)
+        normalized["segments"] = normalized_segments
+
+    if "secondary_text" in normalized:
+        normalized["secondary_text"] = _to_simplified_chinese(str(normalized.get("secondary_text", "")).strip())
+
+    return normalized
+
+
+def _segment_midpoint(segment: Dict[str, Any]) -> float:
+    start = float(segment.get("start", 0) or 0)
+    end = float(segment.get("end", start) or start)
+    return (start + end) / 2
+
+
+def _segment_overlap(segment_a: Dict[str, Any], segment_b: Dict[str, Any]) -> float:
+    start_a = float(segment_a.get("start", 0) or 0)
+    end_a = float(segment_a.get("end", start_a) or start_a)
+    start_b = float(segment_b.get("start", 0) or 0)
+    end_b = float(segment_b.get("end", start_b) or start_b)
+    return max(0.0, min(end_a, end_b) - max(start_a, start_b))
+
+
+def _pick_matching_segment(
+    reference_segment: Dict[str, Any],
+    candidates: list[Dict[str, Any]],
+    start_index: int,
+) -> tuple[Optional[Dict[str, Any]], int]:
+    best_match: Optional[Dict[str, Any]] = None
+    best_index = start_index
+    best_overlap = -1.0
+    reference_midpoint = _segment_midpoint(reference_segment)
+
+    for index in range(start_index, len(candidates)):
+        candidate = candidates[index]
+        candidate_midpoint = _segment_midpoint(candidate)
+        if candidate_midpoint > reference_midpoint + 8:
+            break
+
+        overlap = _segment_overlap(reference_segment, candidate)
+        if overlap > best_overlap:
+            best_match = candidate
+            best_index = index
+            best_overlap = overlap
+            continue
+
+        if best_overlap <= 0:
+            best_distance = abs(_segment_midpoint(best_match) - reference_midpoint) if best_match else float("inf")
+            candidate_distance = abs(candidate_midpoint - reference_midpoint)
+            if candidate_distance < best_distance:
+                best_match = candidate
+                best_index = index
+
+    if best_match is None:
+        return None, start_index
+    return best_match, best_index
+
+
+def _merge_bilingual_transcript(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+    primary_segments = primary.get("segments") or []
+    secondary_segments = secondary.get("segments") or []
+
+    merged_segments: list[Dict[str, Any]] = []
+    secondary_index = 0
+    for segment in primary_segments:
+        primary_text = _to_simplified_chinese(str(segment.get("text", "")).strip())
+        secondary_text = ""
+        matched_segment, secondary_index = _pick_matching_segment(segment, secondary_segments, secondary_index)
+        if matched_segment is not None:
+            secondary_text = str(matched_segment.get("text", "")).strip()
+            if secondary_index < len(secondary_segments) - 1:
+                secondary_index += 1
+
+        if secondary_text and secondary_text != primary_text:
+            merged_text = f"{primary_text}\n{secondary_text}" if primary_text else secondary_text
+        else:
+            merged_text = primary_text or secondary_text
+
+        merged_segment = dict(segment)
+        merged_segment["text"] = merged_text
+        merged_segments.append(merged_segment)
+
+    if merged_segments:
+        merged_text = "\n".join(
+            str(item.get("text", "")).strip() for item in merged_segments if str(item.get("text", "")).strip()
+        ).strip()
+        return {
+            **primary,
+            "segments": merged_segments,
+            "text": merged_text,
+            "secondary_text": secondary.get("text", ""),
+        }
+
+    primary_text = _to_simplified_chinese(str(primary.get("text", "")).strip())
+    secondary_text = str(secondary.get("text", "")).strip()
+    if secondary_text and secondary_text != primary_text:
+        merged_text = f"{primary_text}\n{secondary_text}" if primary_text else secondary_text
+    else:
+        merged_text = primary_text or secondary_text
+
+    return {
+        **primary,
+        "text": merged_text,
+        "secondary_text": secondary.get("text", ""),
+    }
 
 
 def _parse_srt_timestamp(timestamp: str) -> int:
@@ -551,78 +1122,69 @@ def _generate_subtitles(
     source_video_path: str,
     output_video_path: str,
     language: Optional[str] = None,
+    mode: Optional[str] = None,
     prompt: Optional[str] = None,
-) -> tuple[str, str, str]:
-    ffmpeg_path = shutil.which("ffmpeg")
-    if not ffmpeg_path:
-        raise HTTPException(status_code=500, detail="未检测到 ffmpeg，请先安装并加入 PATH")
-
+) -> tuple[str, str, Optional[str]]:
     whisper_url = settings.get("subtitleLocalWhisperUrl", "").strip()
     model = settings.get("subtitleLocalModel", "").strip()
     word_timestamps = bool(settings.get("subtitleWordTimestamps", True))
-    effective_language = (language or settings.get("subtitleLanguage", "") or "").strip()
-    effective_prompt = (prompt or settings.get("subtitlePrompt", "") or "").strip()
+    raw_language = language if language is not None else settings.get("subtitleLanguage", "")
+    if raw_language is None or str(raw_language).strip() == "":
+        raw_language = DEFAULT_SETTINGS["subtitleLanguage"]
+    effective_language = _resolve_subtitle_language(str(raw_language))
+    effective_mode = _resolve_subtitle_mode(mode)
+    raw_prompt = prompt if prompt is not None else settings.get("subtitlePrompt", "")
+    if raw_prompt is None or str(raw_prompt).strip() == "":
+        raw_prompt = DEFAULT_SETTINGS["subtitlePrompt"]
+    effective_prompt = _resolve_subtitle_prompt(str(raw_prompt))
     if not whisper_url:
         raise HTTPException(status_code=400, detail="未配置本地 Whisper 地址")
     if not model:
         raise HTTPException(status_code=400, detail="未配置本地 Whisper 模型")
 
-    wav_output_path = os.path.join(
-        os.path.dirname(output_video_path),
-        _build_subtitle_filename(os.path.basename(output_video_path), ".wav"),
-    )
-
-    extract_command = [
-        ffmpeg_path,
-        "-i",
-        source_video_path,
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-c:a",
-        "pcm_s16le",
-        "-y",
-        wav_output_path,
-    ]
-
-    logger.info(f"开始提取字幕音轨: {' '.join(extract_command)}")
-
     try:
-        extract_result = subprocess.run(
-            extract_command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if extract_result.returncode != 0:
-            error_msg = (extract_result.stderr or extract_result.stdout or "").strip()
-            raise HTTPException(
-                status_code=500,
-                detail=f"提取音频失败: {error_msg or 'ffmpeg 执行失败'}",
+        def run_transcribe(task: str, task_language: Optional[str]) -> Dict[str, Any]:
+            transcript_by_path = _transcribe_with_local_whisper_by_path(
+                source_path=source_video_path,
+                whisper_url=whisper_url,
+                model=model,
+                task=task,
+                word_timestamps=word_timestamps,
+                language=task_language,
+                prompt=effective_prompt,
+            )
+            if transcript_by_path is not None:
+                return transcript_by_path
+
+            return _transcribe_with_local_whisper(
+                source_path=source_video_path,
+                whisper_url=whisper_url,
+                model=model,
+                task=task,
+                word_timestamps=word_timestamps,
+                language=task_language,
+                prompt=effective_prompt,
             )
 
-        request_url = f"{_normalize_local_whisper_url(whisper_url)}/transcribe"
-        data: list[tuple[str, str]] = [("model", model), ("task", "transcribe")]
-        if effective_language:
-            data.append(("language", effective_language))
-        if effective_prompt:
-            data.append(("initial_prompt", effective_prompt))
-        data.append(("word_timestamps", "true" if word_timestamps else "false"))
+        if effective_mode == "en":
+            transcript = run_transcribe(task="translate", task_language=None)
+        elif effective_mode == "mixed":
+            transcript = run_transcribe(task="transcribe", task_language=None)
+        elif effective_mode == "bilingual":
+            source_transcript = run_transcribe(
+                task="transcribe",
+                task_language=None,
+            )
+            english_transcript = run_transcribe(task="translate", task_language=None)
+            transcript = _merge_bilingual_transcript(
+                _normalize_transcript_texts(source_transcript),
+                _normalize_transcript_texts(english_transcript),
+            )
+        else:
+            transcript = run_transcribe(task="transcribe", task_language=effective_language or "zh")
 
-        with open(wav_output_path, "rb") as f:
-            files = {"file": (os.path.basename(wav_output_path), f, "audio/wav")}
-            response = requests.post(request_url, data=data, files=files, timeout=600)
-
-        if response.status_code >= 400:
-            detail = response.text.strip() or f"HTTP {response.status_code}"
-            raise HTTPException(status_code=500, detail=f"本地 Whisper 字幕生成失败: {detail}")
-
-        try:
-            transcript = response.json()
-        except ValueError as e:
-            raise HTTPException(status_code=500, detail=f"本地 Whisper 返回的不是 JSON: {e}")
+        if effective_mode != "bilingual":
+            transcript = _normalize_transcript_texts(transcript)
 
         srt_content = _build_srt_content(transcript)
         if not srt_content.strip():
@@ -644,9 +1206,12 @@ def _generate_subtitles(
 
             json.dump(transcript, f, ensure_ascii=False, indent=2)
 
-        return subtitle_path, subtitle_json_path, wav_output_path
+        return subtitle_path, subtitle_json_path, None
     except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"本地 Whisper 请求失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=_build_whisper_connection_error(e, whisper_url),
+        )
 
 
 def _resolve_video_path(file_path: str) -> tuple[str, str]:
@@ -963,6 +1528,7 @@ def transform_video(request: TransformVideoRequest) -> Dict[str, Any]:
         subtitle_rel_path: Optional[str] = None
         subtitle_json_rel_path: Optional[str] = None
         subtitle_wav_rel_path: Optional[str] = None
+        burned_video_rel_path: Optional[str] = None
         logger.info(f"✓ 视频转码完成: {rel_path}")
 
         if request.generate_subtitles:
@@ -970,37 +1536,35 @@ def transform_video(request: TransformVideoRequest) -> Dict[str, Any]:
                 source_video_path=output_path,
                 output_video_path=output_path,
                 language=request.subtitle_language,
+                mode=request.subtitle_mode,
                 prompt=request.subtitle_prompt,
             )
             subtitle_rel_path = os.path.relpath(subtitle_path, download_dir)
             subtitle_json_rel_path = os.path.relpath(subtitle_json_path, download_dir)
-            subtitle_wav_rel_path = os.path.relpath(subtitle_wav_path, download_dir)
+            subtitle_wav_rel_path = (
+                os.path.relpath(subtitle_wav_path, download_dir) if subtitle_wav_path else None
+            )
             logger.info(f"✓ 字幕生成完成: {subtitle_rel_path}")
+
+            if request.auto_burn_subtitles:
+                burned_video_path = _burn_subtitle_video(output_path, subtitle_path)
+                burned_video_rel_path = os.path.relpath(burned_video_path, download_dir)
+                logger.info(f"✓ 自动烧录内嵌字幕完成: {burned_video_rel_path}")
 
         if _is_webdav_enabled_for("transform"):
             try:
-                remote_path = _upload_to_webdav(output_path, "transform")
-                logger.info(f"✓ 转码文件已上传到 WebDAV: {remote_path}")
-                if subtitle_rel_path:
-                    subtitle_remote_path = _upload_to_webdav(
-                        os.path.join(download_dir, subtitle_rel_path),
-                        "transform",
-                    )
-                    logger.info(f"✓ 字幕文件已上传到 WebDAV: {subtitle_remote_path}")
-                if subtitle_json_rel_path:
-                    subtitle_json_remote_path = _upload_to_webdav(
-                        os.path.join(download_dir, subtitle_json_rel_path),
-                        "transform",
-                    )
-                    logger.info(
-                        f"✓ 字幕 JSON 已上传到 WebDAV: {subtitle_json_remote_path}"
-                    )
-                if subtitle_wav_rel_path:
-                    subtitle_wav_remote_path = _upload_to_webdav(
-                        os.path.join(download_dir, subtitle_wav_rel_path),
-                        "transform",
-                    )
-                    logger.info(f"✓ 字幕 WAV 已上传到 WebDAV: {subtitle_wav_remote_path}")
+                remote_artifacts = _upload_workflow_outputs(
+                    {
+                        "video": output_path,
+                        "subtitle": os.path.join(download_dir, subtitle_rel_path) if subtitle_rel_path else None,
+                        "subtitle_json": os.path.join(download_dir, subtitle_json_rel_path) if subtitle_json_rel_path else None,
+                        "subtitle_wav": os.path.join(download_dir, subtitle_wav_rel_path) if subtitle_wav_rel_path else None,
+                        "burned_video": os.path.join(download_dir, burned_video_rel_path) if burned_video_rel_path else None,
+                    },
+                    "transform",
+                )
+                for key, remote_path in remote_artifacts.items():
+                    logger.info(f"✓ 工作流产物已上传到 WebDAV [{key}]: {remote_path}")
             except Exception as e:
                 logger.error(f"✗ 转码文件上传 WebDAV 失败: {e}")
 
@@ -1010,6 +1574,7 @@ def transform_video(request: TransformVideoRequest) -> Dict[str, Any]:
             "subtitle_path": subtitle_rel_path,
             "subtitle_json_path": subtitle_json_rel_path,
             "subtitle_wav_path": subtitle_wav_rel_path,
+            "burned_video_path": burned_video_rel_path,
             "error": None,
         }
 
@@ -1032,27 +1597,35 @@ def generate_subtitles(request: GenerateSubtitleRequest) -> Dict[str, Any]:
             source_video_path=input_path,
             output_video_path=input_path,
             language=request.subtitle_language,
+            mode=request.subtitle_mode,
             prompt=request.subtitle_prompt,
         )
         subtitle_rel_path = os.path.relpath(subtitle_path, download_dir)
         subtitle_json_rel_path = os.path.relpath(subtitle_json_path, download_dir)
-        subtitle_wav_rel_path = os.path.relpath(subtitle_wav_path, download_dir)
+        subtitle_wav_rel_path = (
+            os.path.relpath(subtitle_wav_path, download_dir) if subtitle_wav_path else None
+        )
+        burned_video_rel_path: Optional[str] = None
         logger.info(f"✓ 独立字幕生成完成: {subtitle_rel_path}")
+
+        if settings.get("subtitleAutoBurnAfterGenerate", False):
+            burned_video_path = _burn_subtitle_video(input_path, subtitle_path)
+            burned_video_rel_path = os.path.relpath(burned_video_path, download_dir)
+            logger.info(f"✓ 自动烧录内嵌字幕完成: {burned_video_rel_path}")
 
         if _is_webdav_enabled_for("transform"):
             try:
-                subtitle_remote_path = _upload_to_webdav(subtitle_path, "transform")
-                logger.info(f"✓ 字幕文件已上传到 WebDAV: {subtitle_remote_path}")
-                subtitle_json_remote_path = _upload_to_webdav(
-                    subtitle_json_path,
+                remote_artifacts = _upload_workflow_outputs(
+                    {
+                        "subtitle": subtitle_path,
+                        "subtitle_json": subtitle_json_path,
+                        "subtitle_wav": subtitle_wav_path,
+                        "burned_video": os.path.join(download_dir, burned_video_rel_path) if burned_video_rel_path else None,
+                    },
                     "transform",
                 )
-                logger.info(f"✓ 字幕 JSON 已上传到 WebDAV: {subtitle_json_remote_path}")
-                subtitle_wav_remote_path = _upload_to_webdav(
-                    subtitle_wav_path,
-                    "transform",
-                )
-                logger.info(f"✓ 字幕 WAV 已上传到 WebDAV: {subtitle_wav_remote_path}")
+                for key, remote_path in remote_artifacts.items():
+                    logger.info(f"✓ 工作流产物已上传到 WebDAV [{key}]: {remote_path}")
             except Exception as e:
                 logger.error(f"✗ 字幕文件上传 WebDAV 失败: {e}")
 
@@ -1061,6 +1634,7 @@ def generate_subtitles(request: GenerateSubtitleRequest) -> Dict[str, Any]:
             "subtitle_path": subtitle_rel_path,
             "subtitle_json_path": subtitle_json_rel_path,
             "subtitle_wav_path": subtitle_wav_rel_path,
+            "burned_video_path": burned_video_rel_path,
             "error": None,
         }
     except HTTPException:
@@ -1084,7 +1658,10 @@ def test_subtitle_api() -> Dict[str, Any]:
             return {"success": False, "detail": detail}
         return {"success": True, "detail": "本地 Whisper 连接成功"}
     except requests.RequestException as e:
-        return {"success": False, "detail": str(e)}
+        return {
+            "success": False,
+            "detail": _build_whisper_connection_error(e, whisper_url),
+        }
 
 
 @router.post("/subtitle/read", response_model=SubtitleFileResponse)
@@ -1135,67 +1712,8 @@ def burn_subtitle_into_video(request: BurnSubtitleRequest) -> Dict[str, Any]:
     download_dir, input_video_path = _resolve_video_path(request.video_path)
     _, subtitle_path = _resolve_subtitle_path(request.subtitle_path)
 
-    ffmpeg_path = shutil.which("ffmpeg")
-    if not ffmpeg_path:
-        raise HTTPException(status_code=500, detail="未检测到 ffmpeg，请先安装并加入 PATH")
-
-    output_path = os.path.join(
-        os.path.dirname(input_video_path),
-        _build_burned_filename(os.path.basename(input_video_path)),
-    )
-
-    style_parts = [
-        f"FontName={request.font_name.strip() or 'Noto Sans CJK SC'}",
-        f"FontSize={request.font_size}",
-        f"PrimaryColour={_normalize_ass_color(request.primary_color, '&H00FFFFFF')}",
-        f"OutlineColour={_normalize_ass_color(request.outline_color, '&H00000000')}",
-        "BorderStyle=1",
-        f"Outline={request.outline}",
-        f"Shadow={request.shadow}",
-        f"MarginV={request.margin_v}",
-        f"Alignment={request.alignment}",
-    ]
-    subtitle_filter = (
-        f"subtitles='{_escape_subtitle_filter_path(subtitle_path)}':"
-        f"force_style='{','.join(style_parts)}'"
-    )
-
-    command = [
-        ffmpeg_path,
-        "-i",
-        input_video_path,
-        "-vf",
-        subtitle_filter,
-        "-c:a",
-        "copy",
-        "-y",
-        output_path,
-    ]
-    logger.info(f"开始烧录内嵌字幕: {' '.join(command)}")
-
     try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        output_lines: list[str] = []
-
-        if process.stdout is not None:
-            for line in process.stdout:
-                line = line.rstrip()
-                if not line:
-                    continue
-                output_lines.append(line)
-                logger.info(f"[ffmpeg-sub] {line}")
-
-        return_code = process.wait()
-        if return_code != 0:
-            error_msg = "\n".join(output_lines[-20:]) or "ffmpeg 执行失败"
-            raise HTTPException(status_code=500, detail=error_msg)
-
+        output_path = _burn_subtitle_video(input_video_path, subtitle_path, request)
         rel_path = _relative_to_download_dir(download_dir, output_path)
         logger.info(f"✓ 内嵌字幕视频已生成: {rel_path}")
 
@@ -1302,7 +1820,7 @@ def rename_local_path(request: RenamePathRequest) -> Dict[str, Any]:
 
 @router.post("/local-delete", response_model=GenericPathResponse)
 def delete_local_path(request: DeletePathRequest) -> Dict[str, Any]:
-    abs_path = os.path.abspath(request.path)
+    abs_path = _resolve_local_operation_path(request.path)
 
     if abs_path in {"/", ""}:
         raise HTTPException(status_code=400, detail="禁止删除根目录")
@@ -1402,8 +1920,59 @@ def upload_file_to_webdav(request: UploadWebDAVRequest) -> Dict[str, Any]:
             request.remote_dir,
             client=client,
         )
+        subtitle_rel_path: Optional[str] = None
+        subtitle_json_rel_path: Optional[str] = None
+        subtitle_wav_rel_path: Optional[str] = None
+        burned_video_rel_path: Optional[str] = None
+        remote_artifacts: Dict[str, str] = {"video": remote_path}
+
+        if settings.get("subtitleAutoGenerateOnUpload", False):
+            subtitle_path, subtitle_json_path, subtitle_wav_path = _generate_subtitles(
+                source_video_path=abs_path,
+                output_video_path=abs_path,
+                language=settings.get("subtitleLanguage", ""),
+                mode=settings.get("subtitleMode", DEFAULT_SETTINGS.get("subtitleMode", "zh")),
+                prompt=settings.get("subtitlePrompt", ""),
+            )
+            subtitle_rel_path = _relative_to_download_dir(download_dir, subtitle_path)
+            subtitle_json_rel_path = _relative_to_download_dir(download_dir, subtitle_json_path)
+            subtitle_wav_rel_path = (
+                _relative_to_download_dir(download_dir, subtitle_wav_path)
+                if subtitle_wav_path
+                else None
+            )
+            logger.info(f"✓ 上传后自动生成字幕完成: {subtitle_rel_path}")
+
+            if settings.get("subtitleAutoBurnAfterGenerate", False):
+                burned_video_path = _burn_subtitle_video(abs_path, subtitle_path)
+                burned_video_rel_path = _relative_to_download_dir(download_dir, burned_video_path)
+                logger.info(f"✓ 上传后自动烧录字幕完成: {burned_video_rel_path}")
+
+            remote_artifacts.update(
+                _upload_workflow_outputs(
+                    {
+                        "subtitle": subtitle_path,
+                        "subtitle_json": subtitle_json_path,
+                        "subtitle_wav": subtitle_wav_path,
+                        "burned_video": os.path.join(download_dir, burned_video_rel_path) if burned_video_rel_path else None,
+                    },
+                    request.category,
+                    client=client,
+                    remote_dir=request.remote_dir,
+                )
+            )
+
         logger.info(f"✓ 文件已上传到 WebDAV: {request.file_path}")
-        return {"success": True, "remote_path": remote_path, "error": None}
+        return {
+            "success": True,
+            "remote_path": remote_path,
+            "subtitle_path": subtitle_rel_path,
+            "subtitle_json_path": subtitle_json_rel_path,
+            "subtitle_wav_path": subtitle_wav_rel_path,
+            "burned_video_path": burned_video_rel_path,
+            "remote_artifacts": remote_artifacts,
+            "error": None,
+        }
     except Exception as e:
         logger.error(f"✗ WebDAV 上传失败: {e}")
         return {"success": False, "remote_path": None, "error": str(e)}
@@ -1483,7 +2052,7 @@ def delete_webdav_path(request: WebDAVDeletePathRequest) -> Dict[str, Any]:
         return {"success": False, "path": None, "error": str(e)}
 
 
-@router.get("/media/{file_path:path}")
+@router.api_route("/media/{file_path:path}", methods=["GET", "HEAD"])
 def serve_media(file_path: str):
     """
     提供媒体文件流服务
@@ -1518,6 +2087,7 @@ def serve_media(file_path: str):
             path=abs_path,
             media_type=content_type,
             filename=os.path.basename(abs_path),
+            headers={"Cache-Control": "no-store, max-age=0", "Accept-Ranges": "bytes"},
         )
 
     except HTTPException:
@@ -1525,3 +2095,17 @@ def serve_media(file_path: str):
     except Exception as e:
         logger.error(f"提供媒体文件失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.api_route("/font/{font_name}", methods=["GET", "HEAD"])
+def serve_preview_font(font_name: str):
+    font_path = PREVIEW_FONT_FILES.get(font_name)
+    if not font_path or not os.path.isfile(font_path):
+        raise HTTPException(status_code=404, detail="字体不存在")
+
+    return FileResponse(
+        path=font_path,
+        media_type="font/ttf",
+        filename=os.path.basename(font_path),
+        headers={"Cache-Control": "public, max-age=3600"},
+    )

@@ -86,6 +86,18 @@ export interface Aria2Config {
   secret: string;
 }
 
+export interface WhisperStatus {
+  desired_model: string;
+  current_model: string | null;
+  container_name: string;
+  container_running: boolean;
+  container_health: string | null;
+  api_reachable: boolean;
+  ready: boolean;
+  downloading: boolean;
+  message: string;
+}
+
 export interface VideoFileItem {
   path: string;
   name: string;
@@ -111,12 +123,15 @@ export interface TransformVideoResult {
   subtitle_path: string | null;
   subtitle_json_path: string | null;
   subtitle_wav_path: string | null;
+  burned_video_path?: string | null;
   error: string | null;
 }
 
 export interface TransformSubtitleOptions {
   generate_subtitles?: boolean;
+  auto_burn_subtitles?: boolean;
   subtitle_language?: string;
+  subtitle_mode?: string;
   subtitle_prompt?: string;
 }
 
@@ -125,6 +140,7 @@ export interface GenerateSubtitleResult {
   subtitle_path: string | null;
   subtitle_json_path: string | null;
   subtitle_wav_path: string | null;
+  burned_video_path?: string | null;
   error: string | null;
 }
 
@@ -151,6 +167,9 @@ export interface BurnSubtitleOptions {
   primary_color?: string;
   outline_color?: string;
   alignment?: number;
+  use_precise_position?: boolean;
+  position_x?: number;
+  position_y?: number;
 }
 
 export interface BurnSubtitleResult {
@@ -167,6 +186,11 @@ export interface SubtitleApiTestResult {
 export interface WebDAVUploadResult {
   success: boolean;
   remote_path: string | null;
+  subtitle_path?: string | null;
+  subtitle_json_path?: string | null;
+  subtitle_wav_path?: string | null;
+  burned_video_path?: string | null;
+  remote_artifacts?: Record<string, string>;
   error: string | null;
 }
 
@@ -323,6 +347,12 @@ export const api = {
       const result = await get<{ is_first_run: boolean }>('/api/settings/first-run');
       return result.is_first_run;
     },
+
+    /** 获取 Whisper 状态 */
+    whisperStatus: () => get<WhisperStatus>('/api/settings/whisper-status'),
+
+    /** 重启 Whisper 容器 */
+    restartWhisper: () => post<{ status: string; message: string }>('/api/settings/whisper-restart'),
   },
   
   // ========================================================================
@@ -524,13 +554,14 @@ export const api = {
       post<GenericPathResult>('/api/file/webdav/delete', config),
 
     /** 获取媒体文件 URL */
-    getMediaUrl: (filePath: string) => {
+    getMediaUrl: (filePath: string, version?: string | number) => {
       // 将路径分段编码，保留路径分隔符
       const encodedPath = filePath
         .split(/[/\\]/)
         .map(segment => encodeURIComponent(segment))
         .join('/');
-      return `${API_BASE_URL}/api/file/media/${encodedPath}`;
+      const suffix = version === undefined || version === null ? '' : `?v=${encodeURIComponent(String(version))}`;
+      return `${API_BASE_URL}/api/file/media/${encodedPath}${suffix}`;
     },
   },
   

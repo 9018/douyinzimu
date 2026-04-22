@@ -44,10 +44,13 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
     webdavUploadDownloads: APP_DEFAULTS.WEBDAV_UPLOAD_DOWNLOADS,
     webdavUploadTransformed: APP_DEFAULTS.WEBDAV_UPLOAD_TRANSFORMED,
     subtitleLanguage: APP_DEFAULTS.SUBTITLE_LANGUAGE,
+    subtitleMode: APP_DEFAULTS.SUBTITLE_MODE,
     subtitlePrompt: APP_DEFAULTS.SUBTITLE_PROMPT,
     subtitleLocalWhisperUrl: APP_DEFAULTS.SUBTITLE_LOCAL_WHISPER_URL,
     subtitleLocalModel: APP_DEFAULTS.SUBTITLE_LOCAL_MODEL,
     subtitleWordTimestamps: APP_DEFAULTS.SUBTITLE_WORD_TIMESTAMPS,
+    subtitleAutoGenerateOnUpload: APP_DEFAULTS.SUBTITLE_AUTO_GENERATE_ON_UPLOAD,
+    subtitleAutoBurnAfterGenerate: APP_DEFAULTS.SUBTITLE_AUTO_BURN_AFTER_GENERATE,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -120,9 +123,9 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 animate-in fade-in duration-300">
-      <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden transform transition-all">
+      <div className="mx-3 max-h-[92vh] w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl transform transition-all sm:mx-4">
         {/* 头部 */}
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-500 to-purple-500">
+        <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-500 to-purple-500 sm:px-6">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-white/20 backdrop-blur-sm rounded-lg flex items-center justify-center">
               <Sparkles className="text-white" size={18} />
@@ -142,8 +145,8 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
         </div>
 
         {/* 进度指示器 */}
-        <div className="px-6 py-3 bg-gray-50/50 border-b border-gray-100">
-          <div className="flex items-center justify-between">
+        <div className="px-4 py-3 bg-gray-50/50 border-b border-gray-100 sm:px-6">
+          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-between">
             {['欢迎', 'Cookie', '下载路径', '完成'].map((label, index) => {
               const steps: WizardStep[] = ['welcome', 'cookie', 'download', 'complete'];
               const stepIndex = steps.indexOf(currentStep);
@@ -177,7 +180,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
         </div>
 
         {/* 内容区域 */}
-        <div className="p-6 min-h-[300px]">
+        <div className="max-h-[calc(92vh-190px)] overflow-y-auto p-4 min-h-[300px] sm:p-6">
           {/* 欢迎页面 */}
           {currentStep === 'welcome' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -353,7 +356,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
                 <label htmlFor="wizard-download-path-input" className="block text-sm font-semibold text-gray-700 mb-3">
                   默认下载路径
                 </label>
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <input
                     id="wizard-download-path-input"
                     name="downloadPath"
@@ -445,7 +448,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
         </div>
 
         {/* 底部按钮 */}
-        <div className="px-6 py-4 bg-gray-50/50 border-t border-gray-100 flex justify-between">
+        <div className="px-4 py-4 bg-gray-50/50 border-t border-gray-100 flex flex-col gap-3 sm:flex-row sm:justify-between sm:px-6">
           <div>
             {currentStep !== 'welcome' && currentStep !== 'complete' && (
               <button
@@ -457,7 +460,7 @@ export const WelcomeWizard: React.FC<WelcomeWizardProps> = ({ isOpen, onClose, o
               </button>
             )}
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
             {currentStep !== 'complete' && (
               <button
                 onClick={handleSkip}

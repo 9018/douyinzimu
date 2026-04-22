@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Whisper ASR Workspace</title>
+    <style>
+      :root {
+        --bg: #f3efe6;
+        --panel: #fffaf2;
+        --ink: #1f1b16;
+        --muted: #6e6258;
+        --line: #d8cabb;
+        --accent: #0f766e;
+        --accent-2: #b45309;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(180,83,9,.12), transparent 28%),
+          radial-gradient(circle at top right, rgba(15,118,110,.12), transparent 32%),
+          var(--bg);
+      }
+      .page { max-width: 1520px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+      .hero, .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 12px 40px rgba(31, 27, 22, .06);
+      }
+      .hero { padding: 20px 24px; }
+      .hero h1 { margin: 0 0 6px; font-size: 32px; }
+      .hero p { margin: 0; color: var(--muted); }
+      .grid { display: grid; gap: 16px; grid-template-columns: 1.05fr 1.35fr; }
+      .subgrid { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+      .panel { padding: 16px; }
+      .panel h2, .panel h3 { margin: 0 0 12px; }
+      .row, .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+      input, select, textarea, button { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 10px; padding: 10px 12px; font: inherit; }
+      input, select, textarea { width: 100%; }
+      textarea { min-height: 96px; resize: vertical; }
+      button { cursor: pointer; background: #fff8ec; }
+      button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+      button.warning { background: #fff3e6; border-color: #efb472; }
+      button.danger { background: #fff0ee; border-color: #d07a6d; color: #7f1d1d; }
+      .muted { color: var(--muted); font-size: 14px; }
+      .file-list, .recent-list {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        max-height: 420px;
+        overflow-y: auto;
+        background: #fff;
+      }
+      .file-row, .recent-row {
+        display: grid;
+        grid-template-columns: 1fr 90px 150px;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 12px;
+        border-top: 1px solid #f1e6d9;
+      }
+      .file-row:first-child, .recent-row:first-child { border-top: 0; }
+      .file-row:hover, .recent-row:hover { background: #fff8ef; }
+      .selected { background: #e8faf7 !important; }
+      .file-name, .recent-name { display: flex; gap: 10px; align-items: center; min-width: 0; }
+      .file-name span:last-child, .recent-name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .badge {
+        font-size: 12px;
+        color: #fff;
+        background: var(--accent-2);
+        border-radius: 999px;
+        padding: 2px 8px;
+      }
+      .pathbox, pre, .preview-box {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      pre { max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+      .preview-box { min-height: 140px; }
+      .result-box { min-height: 140px; }
+      .status { color: var(--accent); min-height: 24px; }
+      audio, video { width: 100%; max-height: 280px; }
+      .downloads { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 12px; }
+      .downloads button { min-width: 92px; }
+      @media (max-width: 1100px) {
+        .grid, .subgrid { grid-template-columns: 1fr; }
+        .file-row, .recent-row { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <h1>Whisper ASR Workspace</h1>
+        <p>默认模型为 <strong id="defaultModel">medium</strong>。混合中英内容建议使用“保留原声”并保持“自动识别”，这样中文保留中文、英文保留英文；只有在你明确要整段翻成英文时再选“转成英文”。</p>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <h2>转写</h2>
+          <div class="row">
+            <label style="flex:1">模型<select id="model"></select></label>
+            <label style="flex:1">
+              语言
+              <select id="languagePreset">
+                <option value="auto" selected>自动识别</option>
+                <option value="zh">中文 zh</option>
+                <option value="en">English en</option>
+                <option value="ja">日本語 ja</option>
+                <option value="ko">한국어 ko</option>
+                <option value="fr">Français fr</option>
+                <option value="de">Deutsch de</option>
+                <option value="es">Español es</option>
+                <option value="ru">Русский ru</option>
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <label style="flex:1">自定义语言代码<input id="language" value="" placeholder="混合原声建议留空；例如 it / pt / ar" /></label>
+          </div>
+          <div class="row">
+            <label style="flex:1">任务<select id="task"><option value="transcribe" selected>保留原声</option><option value="translate">转成英文</option></select></label>
+            <label style="flex:1">逐词时间戳<select id="wordTimestamps"><option value="true" selected>true</option><option value="false">false</option></select></label>
+          </div>
+          <label>Initial Prompt<textarea id="initialPrompt" placeholder="可留空"></textarea></label>
+          <div class="toolbar">
+            <input id="uploadInput" type="file" style="max-width: 320px" />
+            <button class="primary" id="uploadBtn">上传并转写</button>
+            <button id="pathBtn">使用当前选中文件转写</button>
+          </div>
+          <div class="pathbox">当前选中文件: <span id="selectedFile" class="muted">未选择</span></div>
+          <div class="status" id="status"></div>
+
+          <h3>结果文本</h3>
+          <div class="downloads">
+            <button data-format="txt">下载 TXT</button>
+            <button data-format="srt">下载 SRT</button>
+            <button data-format="vtt">下载 VTT</button>
+            <button data-format="tsv">下载 TSV</button>
+            <button data-format="json">下载 JSON</button>
+          </div>
+          <pre class="result-box" id="resultText"></pre>
+          <h3>结果 JSON</h3>
+          <pre id="resultMeta"></pre>
+        </div>
+
+        <div class="panel">
+          <h2>文件浏览器</h2>
+          <div class="toolbar">
+            <select id="rootSelect" style="max-width: 360px"></select>
+            <button id="openRootBtn">打开根目录</button>
+            <button id="upBtn">上级目录</button>
+            <button id="refreshBtn">刷新</button>
+          </div>
+          <div class="pathbox" id="currentPath"></div>
+          <div class="toolbar">
+            <button id="copyBtn">复制</button>
+            <button id="moveBtn">剪切</button>
+            <button id="pasteBtn" class="warning">粘贴到当前目录</button>
+            <button id="renameBtn">重命名</button>
+            <button id="deleteBtn" class="danger">删除</button>
+            <a id="downloadBtn" href="#" target="_blank"><button type="button">下载文件</button></a>
+          </div>
+          <div class="file-list" id="fileList"></div>
+        </div>
+      </section>
+
+      <section class="subgrid">
+        <div class="panel">
+          <h2>文件预览</h2>
+          <div class="pathbox" id="previewPath">未选择文件</div>
+          <div class="preview-box" id="previewBox"></div>
+        </div>
+        <div class="panel">
+          <h2>最新输出</h2>
+          <div class="recent-list" id="recentList"></div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const state = { roots: [], currentPath: "", selected: null, clipboard: null, lastResult: null, lastResultName: "transcript" };
+      const els = {
+        defaultModel: document.getElementById("defaultModel"),
+        model: document.getElementById("model"),
+        language: document.getElementById("language"),
+        languagePreset: document.getElementById("languagePreset"),
+        task: document.getElementById("task"),
+        wordTimestamps: document.getElementById("wordTimestamps"),
+        initialPrompt: document.getElementById("initialPrompt"),
+        uploadInput: document.getElementById("uploadInput"),
+        selectedFile: document.getElementById("selectedFile"),
+        status: document.getElementById("status"),
+        resultText: document.getElementById("resultText"),
+        resultMeta: document.getElementById("resultMeta"),
+        rootSelect: document.getElementById("rootSelect"),
+        currentPath: document.getElementById("currentPath"),
+        fileList: document.getElementById("fileList"),
+        downloadBtn: document.getElementById("downloadBtn"),
+        previewPath: document.getElementById("previewPath"),
+        previewBox: document.getElementById("previewBox"),
+        recentList: document.getElementById("recentList"),
+      };
+
+      function setStatus(text) { els.status.textContent = text; }
+
+      function paramsToFormData(extra = {}) {
+        const form = new FormData();
+        form.set("task", els.task.value);
+        form.set("model", els.model.value);
+        form.set("language", getLanguageValue());
+        form.set("word_timestamps", els.wordTimestamps.value);
+        form.set("initial_prompt", els.initialPrompt.value);
+        for (const [key, value] of Object.entries(extra)) form.set(key, value);
+        return form;
+      }
+
+      function getLanguageValue() {
+        if (els.languagePreset.value === "auto") return "";
+        if (els.languagePreset.value === "custom") return els.language.value.trim();
+        return els.languagePreset.value;
+      }
+
+      async function fetchJson(url, options) {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      function humanSize(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+        if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+        return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+      }
+
+      async function loadModelsAndRoots() {
+        const [modelsRes, rootsRes] = await Promise.all([fetchJson("/models"), fetchJson("/api/roots")]);
+        els.defaultModel.textContent = modelsRes.default_model;
+        els.model.innerHTML = "";
+        Object.keys(modelsRes.models).forEach((name) => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = `${name}${modelsRes.models[name] ? "" : " (download on demand)"}`;
+          if (name === modelsRes.default_model) opt.selected = true;
+          els.model.appendChild(opt);
+        });
+        state.roots = rootsRes.roots;
+        els.rootSelect.innerHTML = "";
+        state.roots.forEach((root) => {
+          const opt = document.createElement("option");
+          opt.value = root.path;
+          opt.textContent = `${root.label}: ${root.path}`;
+          els.rootSelect.appendChild(opt);
+        });
+        if (!state.roots.length) {
+          throw new Error("没有可用的根目录");
+        }
+        els.rootSelect.value = state.roots[0].path;
+      }
+
+      function renderFiles(entries) {
+        els.fileList.innerHTML = "";
+        if (!entries.length) {
+          els.fileList.innerHTML = `<div class="file-row"><div class="muted">目录为空</div></div>`;
+          return;
+        }
+        entries.forEach((entry) => {
+          const row = document.createElement("div");
+          row.className = "file-row" + (state.selected?.path === entry.path ? " selected" : "");
+          row.innerHTML = `
+            <div class="file-name"><span class="badge">${entry.is_dir ? "DIR" : (entry.suffix || "FILE").slice(0, 8)}</span><span>${entry.name}</span></div>
+            <div>${entry.is_dir ? "-" : humanSize(entry.size)}</div>
+            <div>${new Date(entry.mtime * 1000).toLocaleString()}</div>
+          `;
+          row.addEventListener("click", () => selectEntry(entry));
+          row.addEventListener("dblclick", async () => {
+            if (entry.is_dir) await openPath(entry.path);
+            else {
+              selectEntry(entry);
+              els.selectedFile.textContent = entry.path;
+            }
+          });
+          els.fileList.appendChild(row);
+        });
+      }
+
+      function renderRecent(items) {
+        els.recentList.innerHTML = "";
+        if (!items.length) {
+          els.recentList.innerHTML = `<div class="recent-row"><div class="muted">暂无输出</div></div>`;
+          return;
+        }
+        items.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "recent-row";
+          row.innerHTML = `
+            <div class="recent-name"><span class="badge">${item.root}</span><span>${item.name}</span></div>
+            <div>${humanSize(item.size)}</div>
+            <div>${new Date(item.mtime * 1000).toLocaleString()}</div>
+          `;
+          row.addEventListener("click", async () => {
+            state.selected = { ...item, is_dir: false };
+            els.selectedFile.textContent = item.path;
+            els.downloadBtn.href = `/api/fs/download?path=${encodeURIComponent(item.path)}`;
+            await previewSelected();
+            await openPath(item.path.substring(0, item.path.lastIndexOf("/")));
+          });
+          row.addEventListener("dblclick", async () => {
+            state.selected = { ...item, is_dir: false };
+            els.selectedFile.textContent = item.path;
+          });
+          els.recentList.appendChild(row);
+        });
+      }
+
+      async function refreshRecent() {
+        const data = await fetchJson("/api/outputs/recent");
+        renderRecent(data.items);
+      }
+
+      async function openPath(path) {
+        const data = await fetchJson(`/api/fs/list?path=${encodeURIComponent(path || "")}`);
+        state.currentPath = data.path;
+        els.currentPath.textContent = data.path;
+        renderFiles(data.entries);
+      }
+
+      function selectEntry(entry) {
+        state.selected = entry;
+        els.selectedFile.textContent = entry.path;
+        els.downloadBtn.href = entry.is_dir ? "#" : `/api/fs/download?path=${encodeURIComponent(entry.path)}`;
+        previewSelected();
+        renderFiles(Array.from(document.querySelectorAll(".file-row")).map(() => entry)); // no-op replaced by refresh below
+        openPath(state.currentPath);
+      }
+
+      async function previewSelected() {
+        if (!state.selected || state.selected.is_dir) {
+          els.previewPath.textContent = "未选择文件";
+          els.previewBox.innerHTML = "";
+          return;
+        }
+        els.previewPath.textContent = state.selected.path;
+        const data = await fetchJson(`/api/fs/preview?path=${encodeURIComponent(state.selected.path)}`);
+        if (data.type === "text") {
+          els.previewBox.innerHTML = `<pre>${escapeHtml(data.content)}</pre>`;
+        } else if (data.type === "media") {
+          const suffix = (state.selected.suffix || "").toLowerCase();
+          if ([".mp4", ".mov", ".mkv", ".webm"].includes(suffix)) {
+            els.previewBox.innerHTML = `<video controls src="${data.url}"></video>`;
+          } else {
+            els.previewBox.innerHTML = `<audio controls src="${data.url}"></audio>`;
+          }
+        } else {
+          els.previewBox.innerHTML = `<div class="muted">${data.message}</div>`;
+        }
+      }
+
+      function escapeHtml(text) {
+        return text.replace(/[&<>"']/g, (m) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m]));
+      }
+
+      async function uploadAndTranscribe() {
+        const file = els.uploadInput.files[0];
+        if (!file) return setStatus("先选一个本地文件。");
+        setStatus("正在上传并转写...");
+        const result = await fetchJson("/transcribe", { method: "POST", body: paramsToFormData({ file }) });
+        state.lastResult = result;
+        state.lastResultName = file.name.replace(/\.[^.]+$/, "") || "transcript";
+        renderResult(result);
+        setStatus("上传转写完成。");
+        await Promise.all([openPath(state.currentPath || els.rootSelect.value), refreshRecent()]);
+      }
+
+      async function transcribeSelectedPath() {
+        if (!state.selected || state.selected.is_dir) return setStatus("先在右侧选中一个音视频文件。");
+        setStatus("正在按路径转写...");
+        const result = await fetchJson("/api/transcribe-path", { method: "POST", body: paramsToFormData({ path: state.selected.path }) });
+        state.lastResult = result;
+        state.lastResultName = state.selected.name.replace(/\.[^.]+$/, "") || "transcript";
+        renderResult(result);
+        setStatus("路径转写完成。");
+        await Promise.all([openPath(state.currentPath || els.rootSelect.value), refreshRecent()]);
+      }
+
+      function renderResult(result) {
+        els.resultText.textContent = result.text || "";
+        els.resultMeta.textContent = JSON.stringify(result, null, 2);
+      }
+
+      function formatTimestamp(seconds, withHours = false, sep = ".") {
+        let ms = Math.round(seconds * 1000);
+        const h = Math.floor(ms / 3600000); ms -= h * 3600000;
+        const m = Math.floor(ms / 60000); ms -= m * 60000;
+        const s = Math.floor(ms / 1000); ms -= s * 1000;
+        return `${withHours || h > 0 ? String(h).padStart(2, "0") + ":" : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}${sep}${String(ms).padStart(3, "0")}`;
+      }
+
+      function resultToFormat(result, format) {
+        const segments = result.segments || [];
+        switch (format) {
+          case "txt":
+            return segments.length ? segments.map(s => (s.text || "").trim()).join("\n") : (result.text || "");
+          case "json":
+            return JSON.stringify(result, null, 2);
+          case "tsv":
+            return "start\tend\ttext\n" + segments.map(s => `${Math.round(s.start * 1000)}\t${Math.round(s.end * 1000)}\t${(s.text || "").trim().replace(/\t/g, " ")}`).join("\n");
+          case "vtt":
+            return "WEBVTT\n\n" + segments.map(s => `${formatTimestamp(s.start)} --> ${formatTimestamp(s.end)}\n${(s.text || "").trim().replaceAll("-->", "->")}\n`).join("\n");
+          case "srt":
+            return segments.map((s, i) => `${i + 1}\n${formatTimestamp(s.start, true, ",")} --> ${formatTimestamp(s.end, true, ",")}\n${(s.text || "").trim().replaceAll("-->", "->")}\n`).join("\n");
+          default:
+            return result.text || "";
+        }
+      }
+
+      function downloadCurrentResult(format) {
+        if (!state.lastResult) return setStatus("先完成一次转写，才可以下载结果。");
+        const content = resultToFormat(state.lastResult, format);
+        const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${state.lastResultName}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      async function runFsAction(action) {
+        if (!state.selected) return setStatus("先选择一个文件或目录。");
+        if (action === "copy" || action === "move") {
+          state.clipboard = { action, source: state.selected.path };
+          return setStatus(`${action === "copy" ? "已复制" : "已剪切"}: ${state.selected.path}`);
+        }
+        if (action === "paste") {
+          if (!state.clipboard) return setStatus("剪贴板为空。");
+          const sourceName = state.clipboard.source.split("/").pop();
+          const destination = `${state.currentPath}/${sourceName}`;
+          await fetchJson("/api/fs/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: state.clipboard.action, source: state.clipboard.source, destination }) });
+          if (state.clipboard.action === "move") state.clipboard = null;
+          setStatus("粘贴完成。");
+          return Promise.all([openPath(state.currentPath), refreshRecent()]);
+        }
+        if (action === "rename") {
+          const newName = prompt("输入新名称", state.selected.name);
+          if (!newName || newName === state.selected.name) return;
+          await fetchJson("/api/fs/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "rename", source: state.selected.path, new_name: newName }) });
+          setStatus("重命名完成。");
+          return Promise.all([openPath(state.currentPath), refreshRecent()]);
+        }
+        if (action === "delete") {
+          if (!confirm(`确定删除 ${state.selected.path} 吗？`)) return;
+          await fetchJson("/api/fs/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", source: state.selected.path }) });
+          state.selected = null;
+          els.selectedFile.textContent = "未选择";
+          els.previewPath.textContent = "未选择文件";
+          els.previewBox.innerHTML = "";
+          setStatus("删除完成。");
+          return Promise.all([openPath(state.currentPath), refreshRecent()]);
+        }
+      }
+
+      document.getElementById("openRootBtn").addEventListener("click", () => openPath(els.rootSelect.value));
+      document.getElementById("refreshBtn").addEventListener("click", () => Promise.all([openPath(state.currentPath || els.rootSelect.value), refreshRecent()]));
+      document.getElementById("upBtn").addEventListener("click", async () => {
+        if (!state.currentPath) return;
+        const idx = state.currentPath.lastIndexOf("/");
+        await openPath(idx > 0 ? state.currentPath.slice(0, idx) : "/");
+      });
+      document.getElementById("copyBtn").addEventListener("click", () => runFsAction("copy"));
+      document.getElementById("moveBtn").addEventListener("click", () => runFsAction("move"));
+      document.getElementById("pasteBtn").addEventListener("click", () => runFsAction("paste"));
+      document.getElementById("renameBtn").addEventListener("click", () => runFsAction("rename"));
+      document.getElementById("deleteBtn").addEventListener("click", () => runFsAction("delete"));
+      document.getElementById("uploadBtn").addEventListener("click", uploadAndTranscribe);
+      document.getElementById("pathBtn").addEventListener("click", transcribeSelectedPath);
+      document.querySelectorAll(".downloads button").forEach((btn) => btn.addEventListener("click", () => downloadCurrentResult(btn.dataset.format)));
+      els.languagePreset.addEventListener("change", () => {
+        if (els.languagePreset.value === "custom") {
+          els.language.focus();
+          return;
+        }
+        if (els.languagePreset.value === "auto") {
+          els.language.value = "";
+          return;
+        }
+        els.language.value = els.languagePreset.value;
+      });
+
+      loadModelsAndRoots()
+        .then(async () => {
+          await openPath(els.rootSelect.value || state.roots[0]?.path || "");
+          await refreshRecent();
+        })
+        .catch((err) => setStatus(`初始化失败: ${err.message}`));
+    </script>
+  </body>
+</html>

@@ -193,8 +193,8 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({ isOpen, showLogs =
     <div className="flex-1 flex flex-col min-w-0 bg-[#F8F9FB]">
       {/* 头部统计 */}
       <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200/60 shadow-sm">
-        <div className="w-full px-8 py-5">
-          <div className="flex items-center justify-between mb-4">
+        <div className="w-full px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
                 <Download size={20} className="text-white" />
@@ -244,7 +244,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({ isOpen, showLogs =
           </div>
 
           {/* 标签页和批量操作 */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             {/* 左侧：标签页 */}
             <div className="flex gap-2">
               <button
@@ -358,7 +358,7 @@ export const DownloadPanel: React.FC<DownloadPanelProps> = ({ isOpen, showLogs =
       </div>
 
       {/* 任务列表 */}
-      <div className={`flex-1 overflow-y-auto px-8 py-6 transition-all duration-300 ${showLogs ? 'mb-64' : 'mb-0'}`}>
+      <div className={`flex-1 overflow-y-auto px-4 py-4 transition-all duration-300 sm:px-6 sm:py-6 lg:px-8 ${showLogs ? 'mb-[40vh] lg:mb-64' : 'mb-0'}`}>
         <div className="w-full h-full">
           {activeTab === 'active' && renderTaskList(activeTasks, 'active')}
           {activeTab === 'waiting' && renderTaskList(waitingTasks, 'waiting')}
@@ -632,7 +632,7 @@ const TaskItem: React.FC<TaskItemProps> = ({
       {/* 展开的详细信息 */}
       {expanded && (
         <div className="mt-4 pt-4 border-t border-gray-100">
-          <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="bg-gray-50 p-3 rounded-lg">
               <div className="text-gray-500 mb-1">任务 GID</div>
               <div className="font-mono text-gray-900 truncate">{task.gid}</div>

@@ -13,6 +13,7 @@ export enum TaskType {
   DOWNLOAD_MANAGER = 'download_manager', // 下载管理
   FILE_MANAGER = 'file_manager', // 文件管理
   VIDEO_TRANSFORM = 'video_transform', // 视频转码
+  VIDEO_TRANSFORM_MOBILE = 'video_transform_mobile', // 字幕工坊移动版
 }
 
 export interface DouyinWork {
@@ -75,10 +76,13 @@ export interface AppSettings {
   webdavUploadDownloads: boolean;
   webdavUploadTransformed: boolean;
   subtitleLanguage: string;
+  subtitleMode: string;
   subtitlePrompt: string;
   subtitleLocalWhisperUrl: string;
   subtitleLocalModel: string;
   subtitleWordTimestamps: boolean;
+  subtitleAutoGenerateOnUpload: boolean;
+  subtitleAutoBurnAfterGenerate: boolean;
 }
 
 export interface GlobalDownloadStat {

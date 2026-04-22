@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Tuple
 import ujson as json
 from loguru import logger
 
-from .constants import CONFIG_DIR, DEFAULT_SETTINGS, SETTINGS_FILE
+from .constants import CONFIG_DIR, DEFAULT_SETTINGS, SETTINGS_FILE, WHISPER_ENV_FILE
 
 
 class SettingsManager:
@@ -54,10 +54,13 @@ class SettingsManager:
         "webdavUploadDownloads": (lambda x: isinstance(x, bool), "必须是布尔值"),
         "webdavUploadTransformed": (lambda x: isinstance(x, bool), "必须是布尔值"),
         "subtitleLanguage": (lambda x: isinstance(x, str), "必须是字符串"),
+        "subtitleMode": (lambda x: isinstance(x, str), "必须是字符串"),
         "subtitlePrompt": (lambda x: isinstance(x, str), "必须是字符串"),
         "subtitleLocalWhisperUrl": (lambda x: isinstance(x, str) and len(x) > 0, "必须是非空字符串"),
         "subtitleLocalModel": (lambda x: isinstance(x, str) and len(x) > 0, "必须是非空字符串"),
         "subtitleWordTimestamps": (lambda x: isinstance(x, bool), "必须是布尔值"),
+        "subtitleAutoGenerateOnUpload": (lambda x: isinstance(x, bool), "必须是布尔值"),
+        "subtitleAutoBurnAfterGenerate": (lambda x: isinstance(x, bool), "必须是布尔值"),
     }
 
     def __init__(self, auto_load: bool = True) -> None:
@@ -111,6 +114,7 @@ class SettingsManager:
         if not os.path.exists(SETTINGS_FILE):
             self._settings = DEFAULT_SETTINGS.copy()
             self._save_file()
+            self._sync_whisper_env()
             logger.info("✓ 默认配置已创建")
             return self._settings
 
@@ -123,10 +127,12 @@ class SettingsManager:
             self._backup_file()
             self._settings = DEFAULT_SETTINGS.copy()
             self._save_file()
+            self._sync_whisper_env()
             return self._settings
         except Exception as e:
             logger.error(f"✗ 加载配置失败: {e}")
             self._settings = DEFAULT_SETTINGS.copy()
+            self._sync_whisper_env()
             return self._settings
 
         # 验证修复 + 补充缺失
@@ -150,6 +156,7 @@ class SettingsManager:
 
         self._settings.update(updates)
         self._save_file()
+        self._sync_whisper_env()
         logger.success(f"✓ 配置已保存: {', '.join(updates.keys())}")
 
     def _validate(self, data: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -188,11 +195,34 @@ class SettingsManager:
 
         if need_save:
             self._save_file()
+        self._sync_whisper_env()
 
     def _save_file(self) -> None:
         """保存配置到文件"""
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(self._settings, f, ensure_ascii=False, indent=2)
+
+    def _sync_whisper_env(self) -> None:
+        """同步生成 Whisper 容器读取的配置文件。"""
+        model = str(
+            self._settings.get("subtitleLocalModel", DEFAULT_SETTINGS["subtitleLocalModel"])
+        ).strip() or DEFAULT_SETTINGS["subtitleLocalModel"]
+        language = str(
+            self._settings.get("subtitleLanguage", DEFAULT_SETTINGS["subtitleLanguage"])
+        ).strip() or DEFAULT_SETTINGS["subtitleLanguage"]
+        content = "\n".join(
+            [
+                f"WHISPER_MODEL={model}",
+                f"WHISPER_LANGUAGE={language}",
+                "WHISPER_PORT=9000",
+                "WHISPER_DEVICE=cpu",
+                "WHISPER_COMPUTE_TYPE=int8",
+                "WHISPER_THREADS=2",
+                "",
+            ]
+        )
+        with open(WHISPER_ENV_FILE, "w", encoding="utf-8") as f:
+            f.write(content)
 
     def _backup_file(self) -> None:
         """备份配置文件"""

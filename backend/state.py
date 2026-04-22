@@ -5,6 +5,7 @@
 管理任务状态、Aria2 连接等运行时资源。
 """
 
+import os
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -45,9 +46,19 @@ class AppState:
     def _init_aria2(self) -> Optional[Aria2Manager]:
         """初始化 Aria2 管理器"""
         try:
+            internal_host = os.getenv(
+                "DOUYIN_ARIA2_HOST",
+                settings.get("aria2Host", ARIA2_DEFAULTS["HOST"]),
+            )
+            internal_port = int(
+                os.getenv(
+                    "DOUYIN_ARIA2_PORT",
+                    settings.get("aria2Port", ARIA2_DEFAULTS["PORT"]),
+                )
+            )
             return Aria2Manager(
-                host=settings.get("aria2Host", ARIA2_DEFAULTS["HOST"]),
-                port=settings.get("aria2Port", ARIA2_DEFAULTS["PORT"]),
+                host=internal_host,
+                port=internal_port,
                 secret=settings.get("aria2Secret", ARIA2_DEFAULTS["SECRET"]),
                 download_dir=settings.get("downloadPath", DOWNLOAD_DIR),
                 max_retries=settings.get(

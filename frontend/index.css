@@ -1,5 +1,67 @@
 @import "tailwindcss";
 
+@font-face {
+    font-family: "WenQuanYi Zen Hei";
+    src: url("/api/file/font/WenQuanYi%20Zen%20Hei") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Noto Sans CJK SC";
+    src: url("/api/file/font/Noto%20Sans%20CJK%20SC") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Noto Sans CJK TC";
+    src: url("/api/file/font/Noto%20Sans%20CJK%20TC") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Noto Sans CJK JP";
+    src: url("/api/file/font/Noto%20Sans%20CJK%20JP") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Source Han Sans SC";
+    src: url("/api/file/font/Source%20Han%20Sans%20SC") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Microsoft YaHei";
+    src: url("/api/file/font/Microsoft%20YaHei") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "PingFang SC";
+    src: url("/api/file/font/PingFang%20SC") format("truetype");
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Arial Unicode MS";
+    src: url("/api/file/font/Arial%20Unicode%20MS") format("truetype");
+    font-display: swap;
+}
+html {
+    min-height: 100%;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    min-height: 100%;
+    overscroll-behavior-y: contain;
+}
+
+#root {
+    min-height: 100vh;
+}
+
 .log-content {
     user-select: text;
     -webkit-user-select: text;

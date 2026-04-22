@@ -21,7 +21,8 @@ import {
   WebDAVConfig,
   WebDAVDirectoryResult,
   WebDAVTestResult,
-  WebDAVUploadResult
+  WebDAVUploadResult,
+  WhisperStatus
 } from './api';
 import { handleError } from '../utils/errorHandler';
 import { logger } from './logger';
@@ -57,6 +58,8 @@ export interface Bridge {
   openExternal: (url: string) => void;
   getSettings: () => Promise<AppSettings>;
   saveSettings: (settings: Partial<AppSettings>) => Promise<void>;
+  getWhisperStatus: () => Promise<WhisperStatus>;
+  restartWhisper: () => Promise<{ status: string; message: string }>;
   selectFolder: () => Promise<string>;
   subscribeToLogs: (callback: (log: any) => void) => Promise<() => void>;
   getTaskStatus: (taskId?: string) => Promise<any[]>;
@@ -71,7 +74,7 @@ export interface Bridge {
   openFolder: (folderPath: string) => Promise<boolean>;
   cookieLogin: () => Promise<{ success: boolean; cookie: string; user_agent: string; error: string }>;
   findLocalFile: (workId: string) => Promise<{ found: boolean; video_path: string | null; images: string[] | null }>;
-  getMediaUrl: (filePath: string) => string;
+  getMediaUrl: (filePath: string, version?: string | number) => string;
   listVideoFiles: () => Promise<VideoFileItem[]>;
   getVideoInfo: (filePath: string) => Promise<VideoInfo>;
   transformVideo: (filePath: string, ffmpegArgs: string, subtitleOptions?: TransformSubtitleOptions) => Promise<TransformVideoResult>;
@@ -142,6 +145,24 @@ export const bridge: Bridge = {
       await api.settings.save(settings);
     } catch (error) {
       handleError(error, settings, { customMessage: 'save settings failed' });
+      throw error;
+    }
+  },
+
+  getWhisperStatus: async () => {
+    try {
+      return await api.settings.whisperStatus();
+    } catch (error) {
+      handleError(error, {}, { customMessage: 'get whisper status failed', showToast: false });
+      throw error;
+    }
+  },
+
+  restartWhisper: async () => {
+    try {
+      return await api.settings.restartWhisper();
+    } catch (error) {
+      handleError(error, {}, { customMessage: 'restart whisper failed' });
       throw error;
     }
   },
@@ -259,7 +280,7 @@ export const bridge: Bridge = {
     }
   },
 
-  getMediaUrl: (filePath) => api.file.getMediaUrl(filePath),
+  getMediaUrl: (filePath, version) => api.file.getMediaUrl(filePath, version),
 
   listVideoFiles: async () => {
     try {

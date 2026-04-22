@@ -6,9 +6,10 @@ import { LogEntry, logger } from '../services/logger';
 interface LogPanelProps {
   isOpen: boolean;
   onToggle: () => void;
+  sidebarOffset?: number;
 }
 
-export const LogPanel: React.FC<LogPanelProps> = ({ isOpen, onToggle }) => {
+export const LogPanel: React.FC<LogPanelProps> = ({ isOpen, onToggle, sidebarOffset = 256 }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -51,9 +52,12 @@ export const LogPanel: React.FC<LogPanelProps> = ({ isOpen, onToggle }) => {
   if (!isOpen) return null;
 
   return (
-    <div className={`fixed bottom-0 left-64 right-0 bg-[#0c0c0c] border-t border-gray-800 shadow-[0_-4px_20px_rgba(0,0,0,0.3)] transition-all duration-300 z-40 flex flex-col font-mono h-64`}>
+    <div
+      className="fixed bottom-0 right-0 z-40 flex max-h-[60vh] h-[40vh] flex-col bg-[#0c0c0c] font-mono shadow-[0_-4px_20px_rgba(0,0,0,0.3)] transition-all duration-300 lg:h-64 lg:max-h-none"
+      style={{ left: sidebarOffset }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-b border-gray-800 select-none">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 bg-[#1a1a1a] px-3 py-2 select-none sm:px-4">
         <div className="flex items-center gap-2 text-gray-400">
           <Terminal size={14} className="text-blue-500" />
           <span className="text-xs font-bold tracking-wider">TERMINAL OUTPUT</span>
@@ -63,8 +67,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({ isOpen, onToggle }) => {
             <div className="w-2 h-2 rounded-full bg-green-500/80"></div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 text-[11px] text-gray-400 mr-2">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-center gap-1 text-[11px] text-gray-400 sm:mr-2">
             <Filter size={12} />
             <button onClick={() => setSourceFilter('all')} className={sourceFilter === 'all' ? 'text-white' : ''}>全部日志</button>
             <button onClick={() => setSourceFilter('backend')} className={sourceFilter === 'backend' ? 'text-white' : ''}>后端</button>

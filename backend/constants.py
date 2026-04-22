@@ -21,6 +21,7 @@ RESOURCE_ROOT = get_resource_root()
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 DOWNLOAD_DIR = os.path.join(PROJECT_ROOT, "download")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
+WHISPER_ENV_FILE = os.path.join(CONFIG_DIR, "whisper.env")
 ARIA2_CONF_FILE = os.path.join(CONFIG_DIR, "aria2.conf")
 WEBVIEW_STORAGE_DIR = os.path.join(CONFIG_DIR, "webview_storage")
 
@@ -58,10 +59,13 @@ DEFAULT_SETTINGS = {
     "webdavUploadDownloads": False,
     "webdavUploadTransformed": False,
     "subtitleLanguage": "",
+    "subtitleMode": "zh",
     "subtitlePrompt": "",
     "subtitleLocalWhisperUrl": "http://host.docker.internal:9001",
     "subtitleLocalModel": "medium",
     "subtitleWordTimestamps": True,
+    "subtitleAutoGenerateOnUpload": False,
+    "subtitleAutoBurnAfterGenerate": False,
 }
 
 # 窗口最小尺寸

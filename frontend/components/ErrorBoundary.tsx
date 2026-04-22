@@ -163,15 +163,15 @@ interface LightErrorBoundaryProps {
 
 export class LightErrorBoundary extends Component<
   LightErrorBoundaryProps,
-  { hasError: boolean }
+  { hasError: boolean; errorMessage: string | null }
 > {
   constructor(props: LightErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, errorMessage: null };
   }
 
-  static getDerivedStateFromError(): { hasError: boolean } {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): { hasError: boolean; errorMessage: string | null } {
+    return { hasError: true, errorMessage: error?.message || null };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
@@ -188,6 +188,11 @@ export class LightErrorBoundary extends Component<
               {this.props.fallbackMessage || '该组件加载失败'}
             </span>
           </div>
+          {this.state.errorMessage && (
+            <div className="mt-2 text-xs text-red-700 break-all">
+              {this.state.errorMessage}
+            </div>
+          )}
         </div>
       );
     }
