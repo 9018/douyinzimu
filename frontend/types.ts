@@ -11,9 +11,6 @@ export enum TaskType {
   FOLLOWING = 'following',   // 用户关注
   FOLLOWER = 'follower',     // 用户粉丝
   DOWNLOAD_MANAGER = 'download_manager', // 下载管理
-  FILE_MANAGER = 'file_manager', // 文件管理
-  VIDEO_TRANSFORM = 'video_transform', // 视频转码
-  VIDEO_TRANSFORM_MOBILE = 'video_transform_mobile', // 字幕工坊移动版
 }
 
 export interface DouyinWork {
@@ -23,13 +20,13 @@ export interface DouyinWork {
     nickname: string;
     avatar: string;
     uid: string;
-    unique_id?: string; // 抖音号
-    short_id?: string; // 短ID
+    unique_id?: string;
+    short_id?: string;
   };
   type: 'video' | 'image';
   cover: string;
-  videoUrl?: string; // For video type
-  images?: string[]; // For image type
+  videoUrl?: string;
+  images?: string[];
   music?: {
     id: string;
     title: string;
@@ -42,7 +39,8 @@ export interface DouyinWork {
     share_count: number;
   };
   create_time: string;
-  duration?: number; // 视频时长（毫秒）
+  create_timestamp: number;
+  duration?: number;
 }
 
 export interface DownloadProgress {
@@ -68,21 +66,11 @@ export interface AppSettings {
   aria2Host: string;
   aria2Port: number;
   aria2Secret: string;
-  webdavEnabled: boolean;
-  webdavUrl: string;
-  webdavUsername: string;
-  webdavPassword: string;
-  webdavBasePath: string;
-  webdavUploadDownloads: boolean;
-  webdavUploadTransformed: boolean;
-  subtitleLanguage: string;
-  subtitleMode: string;
-  subtitlePrompt: string;
-  subtitleLocalWhisperUrl: string;
-  subtitleLocalModel: string;
-  subtitleWordTimestamps: boolean;
-  subtitleAutoGenerateOnUpload: boolean;
-  subtitleAutoBurnAfterGenerate: boolean;
+  enableDownloadTitle: boolean;
+  enableDownloadCover: boolean;
+  downloadInterval: number;
+  filenameFields: string[];
+  filenameSeparator: string;
 }
 
 export interface GlobalDownloadStat {

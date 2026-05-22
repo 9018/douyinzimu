@@ -8,19 +8,17 @@ Cookie 登录获取模块
 
 import threading
 from dataclasses import dataclass
-from typing import Optional
 
 import webview
 from loguru import logger
 
 # 目标 API 路径（登录后会请求这些接口）
 TARGET_API_PATHS = [
-    "/aweme/v1/web/aweme/post/",
-    "/aweme/v1/web/aweme/favorite/",
+    "/aweme/v1/web/search/item",
 ]
 
 # 登录页面 URL
-LOGIN_URL = "https://www.douyin.com/user/self"
+LOGIN_URL = "https://www.douyin.com/search/deepseek?type=video"
 
 
 @dataclass
@@ -45,9 +43,9 @@ def get_cookie_by_login() -> CookieResult:
     logger.info("🔐 正在打开抖音登录窗口...")
 
     captured = False
-    result: Optional[CookieResult] = None
+    result: CookieResult | None = None
     result_event = threading.Event()
-    window: Optional[webview.Window] = None
+    window: webview.Window | None = None
 
     def on_request_sent(request) -> None:
         nonlocal captured, result
@@ -131,6 +129,13 @@ def get_cookie_by_login() -> CookieResult:
     window.events.loaded += on_loaded
 
     # 等待窗口关闭
-    result_event.wait()
+    result_event.wait(timeout=300)
+
+    if result is None:
+        result = CookieResult(success=False, error="登录超时")
+        try:
+            window.destroy()
+        except Exception:
+            pass
 
     return result

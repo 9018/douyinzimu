@@ -1,61 +1,47 @@
 # Stage 1: 构建前端
 FROM node:20-alpine AS frontend-builder
 
-ARG VITE_API_BASE_URL=
+# 接受构建参数
+ARG VITE_API_BASE_URL=http://localhost:8000
+
+# 设置为环境变量，Vite 在构建时可以访问
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
-WORKDIR /app/frontend
+WORKDIR /app
 
-COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
-
+# 复制源代码
 COPY frontend/ ./
+
+# 安装 pnpm 和依赖
+RUN npm install -g pnpm && export CI='true' && pnpm install --frozen-lockfile
+
+# 构建前端
 RUN pnpm build
 
-# Stage 2: Python 后端运行时
+# Stage 2: Python 后端
 FROM nikolaik/python-nodejs:python3.12-nodejs22-slim
 
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    TZ=Asia/Shanghai
+# 安装系统依赖
+# RUN apt-get update && \
+#     apt-get install -y --no-install-recommends \
+#         libwebkit2gtk-4.1-dev \
+#         libglib2.0-dev \
+#         && rm -rf /var/lib/apt/lists/*
 
-# 切换 apt 镜像源（中国大陆环境加速）
-RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-      sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources; \
-    fi
-
-# 安装构建依赖 + aria2 + ffmpeg
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    make \
-    pkg-config \
-    libcairo2-dev \
-    libgirepository1.0-dev \
-    libgtk-3-dev \
-    libwebkit2gtk-4.1-dev \
-    libglib2.0-dev \
-    aria2 \
-    docker.io \
-    ffmpeg \
-    fontconfig \
-    fonts-noto-cjk \
-    fonts-wqy-zenhei \
-    tzdata \
-    && fc-cache -f -v \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-# 安装 pnpm（用于挂载前端源码时在容器内构建 dist）
-RUN corepack enable
-
+# 复制依赖文件
 COPY requirements.txt ./
-RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY . ./
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["python", "-m", "backend.server", "--host", "0.0.0.0", "--port", "8000"]
+# 复制其余项目文件
+COPY . .
+
+
+# 从 stage 1 复制前端构建产物
+COPY --from=frontend-builder /app/dist ./frontend/dist/
+
+# 启动服务器
+CMD ["python", "-m", "backend.server"]

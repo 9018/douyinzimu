@@ -1,28 +1,13 @@
 
-import { ChevronDown, ChevronUp, ExternalLink, FolderOpen, Loader2, LogIn, RefreshCw, Save, TestTube2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, FolderOpen, LogIn, Save, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { APP_DEFAULTS } from '../constants';
 import { aria2Service } from '../services/aria2Service';
 import { bridge, isGUIMode } from '../services/bridge';
 import { logger } from '../services/logger';
 import { AppSettings } from '../types';
+import { FILENAME_FIELDS, generateFilenamePreview } from '../utils/formatters';
 import { toast } from './Toast';
-
-const whisperModelOptions = [
-  'tiny',
-  'base',
-  'small',
-  'medium',
-  'large-v3',
-  'large-v3-turbo',
-];
-
-const subtitleModeOptions = [
-  { value: 'zh', label: '仅中文（默认）' },
-  { value: 'en', label: '仅英文' },
-  { value: 'bilingual', label: '原文 + 英文双语' },
-  { value: 'source', label: '仅原文（自动识别）' },
-];
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -98,6 +83,82 @@ const NumberInput: React.FC<NumberInputProps> = ({ label, value, min, max, onCha
   );
 };
 
+interface FilenameFieldsEditorProps {
+  fields: string[];
+  separator: string;
+  onChange: (fields: string[]) => void;
+}
+
+const FilenameFieldsEditor: React.FC<FilenameFieldsEditorProps> = ({ fields, separator, onChange }) => {
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === index) return;
+    const newFields = [...fields];
+    const [removed] = newFields.splice(dragIndex, 1);
+    newFields.splice(index, 0, removed);
+    onChange(newFields);
+    setDragIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    setDragIndex(null);
+  };
+
+  const handleRemove = (index: number) => {
+    if (fields.length <= 1) return;
+    const newFields = fields.filter((_, i) => i !== index);
+    onChange(newFields);
+  };
+
+  const getFieldLabel = (key: string) => {
+    return FILENAME_FIELDS.find(f => f.key === key)?.label || key;
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 min-h-[36px] p-2.5 bg-white rounded-lg border border-gray-100">
+      {fields.length === 0 ? (
+        <span className="text-xs text-gray-400">请至少选择一个字段</span>
+      ) : (
+        fields.map((field, index) => (
+          <React.Fragment key={`${field}-${index}`}>
+            {index > 0 && (
+              <span className="text-xs text-gray-300 font-mono">{separator}</span>
+            )}
+            <span
+              draggable
+              onDragStart={() => handleDragStart(index)}
+              onDragOver={(e) => handleDragOver(e, index)}
+              onDragEnd={handleDragEnd}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium cursor-grab active:cursor-grabbing transition-all ${
+                dragIndex === index
+                  ? 'bg-blue-100 text-blue-700 shadow-sm opacity-60'
+                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+              }`}
+            >
+              {getFieldLabel(field)}
+              {fields.length > 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRemove(index); }}
+                  className="ml-0.5 hover:text-red-500 transition-colors"
+                  title="移除"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </span>
+          </React.Fragment>
+        ))
+      )}
+    </div>
+  );
+};
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [settings, setSettings] = useState<AppSettings>({
     cookie: APP_DEFAULTS.COOKIE,
@@ -109,35 +170,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     aria2Host: APP_DEFAULTS.ARIA2_HOST,
     aria2Port: APP_DEFAULTS.ARIA2_PORT,
     aria2Secret: APP_DEFAULTS.ARIA2_SECRET,
-    webdavEnabled: APP_DEFAULTS.WEBDAV_ENABLED,
-    webdavUrl: APP_DEFAULTS.WEBDAV_URL,
-    webdavUsername: APP_DEFAULTS.WEBDAV_USERNAME,
-    webdavPassword: APP_DEFAULTS.WEBDAV_PASSWORD,
-    webdavBasePath: APP_DEFAULTS.WEBDAV_BASE_PATH,
-    webdavUploadDownloads: APP_DEFAULTS.WEBDAV_UPLOAD_DOWNLOADS,
-    webdavUploadTransformed: APP_DEFAULTS.WEBDAV_UPLOAD_TRANSFORMED,
-    subtitleLanguage: APP_DEFAULTS.SUBTITLE_LANGUAGE,
-    subtitleMode: APP_DEFAULTS.SUBTITLE_MODE,
-    subtitlePrompt: APP_DEFAULTS.SUBTITLE_PROMPT,
-    subtitleLocalWhisperUrl: APP_DEFAULTS.SUBTITLE_LOCAL_WHISPER_URL,
-    subtitleLocalModel: APP_DEFAULTS.SUBTITLE_LOCAL_MODEL,
-    subtitleWordTimestamps: APP_DEFAULTS.SUBTITLE_WORD_TIMESTAMPS,
-    subtitleAutoGenerateOnUpload: APP_DEFAULTS.SUBTITLE_AUTO_GENERATE_ON_UPLOAD,
-    subtitleAutoBurnAfterGenerate: APP_DEFAULTS.SUBTITLE_AUTO_BURN_AFTER_GENERATE,
+    enableDownloadTitle: APP_DEFAULTS.ENABLE_DOWNLOAD_TITLE,
+    enableDownloadCover: APP_DEFAULTS.ENABLE_DOWNLOAD_COVER,
+    downloadInterval: APP_DEFAULTS.DOWNLOAD_INTERVAL,
+    filenameFields: APP_DEFAULTS.FILENAME_FIELDS as string[],
+    filenameSeparator: APP_DEFAULTS.FILENAME_SEPARATOR,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isTestingSubtitleApi, setIsTestingSubtitleApi] = useState(false);
-  const [isRestartingWhisper, setIsRestartingWhisper] = useState(false);
-  const [isLoadingWhisperStatus, setIsLoadingWhisperStatus] = useState(false);
-  const [whisperStatus, setWhisperStatus] = useState<Awaited<ReturnType<typeof bridge.getWhisperStatus>> | null>(null);
   const [errors, setErrors] = useState<Partial<Record<keyof AppSettings, string>>>({});
-  const [saveMessage, setSaveMessage] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       loadSettings();
-      loadWhisperStatus();
     }
   }, [isOpen]);
 
@@ -146,25 +191,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const data = await bridge.getSettings();
       setSettings({
         ...data,
-        subtitleLanguage: data.subtitleLanguage || APP_DEFAULTS.SUBTITLE_LANGUAGE,
-        subtitleMode: data.subtitleMode || APP_DEFAULTS.SUBTITLE_MODE,
-        subtitlePrompt: data.subtitlePrompt || APP_DEFAULTS.SUBTITLE_PROMPT,
+        filenameFields: data.filenameFields || ['id', 'title'],
+        filenameSeparator: data.filenameSeparator || '_',
       });
-      setSaveMessage('');
     } catch (e) {
       console.error("Failed to load settings", e);
-    }
-  };
-
-  const loadWhisperStatus = async () => {
-    setIsLoadingWhisperStatus(true);
-    try {
-      const status = await bridge.getWhisperStatus();
-      setWhisperStatus(status);
-    } catch (e) {
-      console.error("Failed to load whisper status", e);
-    } finally {
-      setIsLoadingWhisperStatus(false);
     }
   };
 
@@ -195,18 +226,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       newErrors.maxConcurrency = "同时下载任务数必须在1-10之间";
     }
 
-    if (!settings.subtitleLocalWhisperUrl.trim()) {
-      newErrors.subtitleLocalWhisperUrl = "本地 Whisper 地址不能为空";
-    }
-
-    if (!settings.subtitleLocalModel.trim()) {
-      newErrors.subtitleLocalModel = "本地 Whisper 模型不能为空";
+    if (settings.downloadInterval < 0 || settings.downloadInterval > 60) {
+      newErrors.downloadInterval = "下载间隔必须在0-60之间";
     }
 
     setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) {
-      setSaveMessage('');
-    }
     return Object.keys(newErrors).length === 0;
   };
 
@@ -218,7 +242,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
 
     setIsSaving(true);
-    setSaveMessage('');
     try {
       await bridge.saveSettings(settings);
       logger.success('✓ 配置保存成功');
@@ -234,14 +257,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
 
       toast.success('配置保存成功');
-      setSaveMessage('配置已保存。Whisper 模型变更需要重启容器后才会生效。');
-      await loadWhisperStatus();
+      // 等待后端日志传递到前端（100ms足够）
+      await new Promise(resolve => setTimeout(resolve, 100));
+      // 关闭弹窗
+      onClose();
     } catch (e) {
       // 保存失败时在日志和Toast中输出
       const errorMsg = e instanceof Error ? e.message : String(e);
       logger.error(`✗ 配置保存失败: ${errorMsg}`);
       toast.error(`配置保存失败: ${errorMsg}`);
-      setSaveMessage(`保存失败：${errorMsg}`);
       console.error("Failed to save settings", e);
     } finally {
       setIsSaving(false);
@@ -259,46 +283,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   };
 
-  const handleTestSubtitleApi = async () => {
-    setIsTestingSubtitleApi(true);
-    try {
-      await bridge.saveSettings({
-        subtitleLanguage: settings.subtitleLanguage,
-        subtitleMode: settings.subtitleMode,
-        subtitlePrompt: settings.subtitlePrompt,
-        subtitleLocalWhisperUrl: settings.subtitleLocalWhisperUrl,
-        subtitleLocalModel: settings.subtitleLocalModel,
-        subtitleWordTimestamps: settings.subtitleWordTimestamps,
-        subtitleAutoGenerateOnUpload: settings.subtitleAutoGenerateOnUpload,
-        subtitleAutoBurnAfterGenerate: settings.subtitleAutoBurnAfterGenerate,
-      });
-      const result = await bridge.testSubtitleApi();
-      if (result.success) {
-        toast.success(result.detail || '本地 Whisper 测试成功');
-      } else {
-        toast.error(result.detail || '本地 Whisper 测试失败');
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '本地 Whisper 测试失败');
-    } finally {
-      setIsTestingSubtitleApi(false);
-    }
-  };
-
-  const handleRestartWhisper = async () => {
-    setIsRestartingWhisper(true);
-    try {
-      const result = await bridge.restartWhisper();
-      toast.success(result.message);
-      setSaveMessage('Whisper 正在重启并应用新模型，首次下载模型时会持续几分钟。');
-      await loadWhisperStatus();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Whisper 重启失败');
-    } finally {
-      setIsRestartingWhisper(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -307,10 +291,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       onClick={onClose}
     >
       <div
-        className="mx-3 max-h-[92vh] w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl transform transition-all scale-100 sm:mx-4"
+        className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] shadow-2xl overflow-hidden transform transition-all scale-100 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-4 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50 sm:px-6">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
           <h3 className="text-lg font-bold text-gray-800">系统设置</h3>
           <button
             onClick={onClose}
@@ -320,14 +304,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </button>
         </div>
 
-        <div className="max-h-[calc(92vh-132px)] overflow-y-auto p-4 space-y-5 sm:p-6">
+        <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1">
           {/* Cookie Setting */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="cookie-input" className="block text-sm font-semibold text-gray-700">
                 Cookie 设置
               </label>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
                 <button
                   onClick={async () => {
                     try {
@@ -434,7 +418,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 }
               }}
               placeholder="请输入 douyin.com 的 Cookie..."
-              className={`w-full h-32 px-4 py-3 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none ${errors.cookie ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'
+              className={`w-full h-24 px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none ${errors.cookie ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'
                 }`}
             />
             {errors.cookie && (
@@ -450,7 +434,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <label htmlFor="download-path-input" className="block text-sm font-semibold text-gray-700 mb-2">
               默认下载路径
             </label>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex gap-2">
               <input
                 id="download-path-input"
                 name="downloadPath"
@@ -484,7 +468,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-4">
             {/* Max Retries */}
             <div>
               <NumberInput
@@ -494,7 +478,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 max={10}
                 onChange={(val) => {
                   setSettings({ ...settings, maxRetries: val });
-                  // 清除错误
                   if (errors.maxRetries) {
                     setErrors(prev => {
                       const newErrors = { ...prev };
@@ -518,7 +501,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 max={10}
                 onChange={(val) => {
                   setSettings({ ...settings, maxConcurrency: val });
-                  // 清除错误
                   if (errors.maxConcurrency) {
                     setErrors(prev => {
                       const newErrors = { ...prev };
@@ -532,6 +514,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <p className="mt-1.5 text-xs text-red-500">{errors.maxConcurrency}</p>
               )}
             </div>
+          </div>
+
+          {/* Download Interval */}
+          <div>
+            <label className="flex items-center justify-between cursor-pointer group">
+              <div>
+                <div className="text-sm font-semibold text-gray-700 mb-1">下载间隔</div>
+                <p className="text-xs text-gray-400">
+                  批量下载时每个任务之间的等待时间（秒），0表示不等待
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  step={0.5}
+                  value={settings.downloadInterval}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val) && val >= 0 && val <= 60) {
+                      setSettings({ ...settings, downloadInterval: val });
+                    }
+                  }}
+                  className="w-20 px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="text-xs text-gray-400">秒</span>
+              </div>
+            </label>
           </div>
 
           {/* 增量采集开关 */}
@@ -555,202 +566,119 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </label>
           </div>
 
-          <div className="border-t border-gray-100 pt-5 space-y-4">
-            <div>
-              <div className="text-sm font-semibold text-gray-700">本地 Whisper 配置</div>
-              <p className="text-xs text-gray-400 mt-1">
-                这里配置本地 Whisper 服务地址和字幕工作流参数。当前 Docker 集成模式下，实际下载和运行的 Whisper 模型由应用自动生成的 `config/whisper.env` 决定。
-              </p>
-            </div>
-
-            <div>
-              <label htmlFor="subtitle-local-whisper-url" className="block text-sm font-semibold text-gray-700 mb-2">
-                本地 Whisper 地址
-              </label>
-              <input
-                id="subtitle-local-whisper-url"
-                name="subtitleLocalWhisperUrl"
-                type="text"
-                value={settings.subtitleLocalWhisperUrl}
-                onChange={(e) => {
-                  setSettings({ ...settings, subtitleLocalWhisperUrl: e.target.value });
-                  setSaveMessage('');
-                }}
-                placeholder="http://127.0.0.1:9001"
-                className={`w-full px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.subtitleLocalWhisperUrl ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'}`}
-              />
-              {errors.subtitleLocalWhisperUrl && (
-                <p className="mt-1.5 text-xs text-red-500">{errors.subtitleLocalWhisperUrl}</p>
-              )}
-              <p className="mt-1.5 text-xs text-gray-400">
-                如果后端跑在 Docker 里，而 Whisper 跑在另一台机器或另一个容器，这里不要填 `127.0.0.1`，应填实际 IP、`host.docker.internal` 或目标容器名。
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* 下载标题开关 */}
+          <div>
+            <label className="flex items-center justify-between cursor-pointer group">
               <div>
-                <label htmlFor="subtitle-local-model" className="block text-sm font-semibold text-gray-700 mb-2">
-                  模型标识
-                </label>
-                <select
-                  id="subtitle-local-model"
-                  name="subtitleLocalModel"
-                  value={settings.subtitleLocalModel}
-                  onChange={(e) => {
-                    setSettings({ ...settings, subtitleLocalModel: e.target.value });
-                    setSaveMessage('');
-                  }}
-                  className={`w-full px-4 py-2.5 border rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all ${errors.subtitleLocalModel ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-blue-500'}`}
-                >
-                  {whisperModelOptions.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-                {errors.subtitleLocalModel && (
-                  <p className="mt-1.5 text-xs text-red-500">{errors.subtitleLocalModel}</p>
-                )}
-                <p className="mt-1.5 text-xs text-gray-400">
-                  Docker 集成的 Whisper 现已默认下载 `medium`。修改这里并保存后，应用会同步写入 `config/whisper.env`。重启 `whisper` 容器后，新模型会开始下载并生效。
+                <div className="text-sm font-semibold text-gray-700 mb-1">下载标题文本</div>
+                <p className="text-xs text-gray-400">
+                  一键下载时，同时保存每个作品的标题为文本文件
                 </p>
               </div>
-
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mt-8">
+              <div className="relative">
                 <input
                   type="checkbox"
-                  checked={settings.subtitleWordTimestamps}
-                  onChange={(e) => setSettings({ ...settings, subtitleWordTimestamps: e.target.checked })}
+                  checked={settings.enableDownloadTitle}
+                  onChange={(e) => setSettings({ ...settings, enableDownloadTitle: e.target.checked })}
+                  className="sr-only peer"
                 />
-                默认开启逐词时间戳
-              </label>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50/70 p-4">
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={settings.subtitleAutoGenerateOnUpload}
-                  onChange={(e) => setSettings({ ...settings, subtitleAutoGenerateOnUpload: e.target.checked })}
-                />
-                上传到 WebDAV 后自动生成字幕
-              </label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={settings.subtitleAutoBurnAfterGenerate}
-                  onChange={(e) => setSettings({ ...settings, subtitleAutoBurnAfterGenerate: e.target.checked })}
-                />
-                生成字幕后自动烧录内嵌字幕视频
-              </label>
-              <p className="text-xs text-gray-500">
-                自动工作流会复用当前 Whisper 配置；如果同时启用了 WebDAV 上传，生成的字幕、JSON、WAV 和烧录视频会一起联动上传。
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="subtitle-mode" className="block text-sm font-semibold text-gray-700 mb-2">
-                  字幕输出模式
-                </label>
-                <select
-                  id="subtitle-mode"
-                  name="subtitleMode"
-                  value={settings.subtitleMode}
-                  onChange={(e) => setSettings({ ...settings, subtitleMode: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                >
-                  {subtitleModeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </div>
-              <div>
-                <label htmlFor="subtitle-language" className="block text-sm font-semibold text-gray-700 mb-2">
-                  语言代码
-                </label>
-                <input
-                  id="subtitle-language"
-                  name="subtitleLanguage"
-                  type="text"
-                  value={settings.subtitleLanguage}
-                  onChange={(e) => setSettings({ ...settings, subtitleLanguage: e.target.value })}
-                  placeholder="zh"
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="subtitle-prompt" className="block text-sm font-semibold text-gray-700 mb-2">
-                提示词
-              </label>
-              <textarea
-                id="subtitle-prompt"
-                name="subtitlePrompt"
-                value={settings.subtitlePrompt}
-                onChange={(e) => setSettings({ ...settings, subtitlePrompt: e.target.value })}
-                placeholder="例如：输出简体中文字幕，保留口语停顿，不要翻译专有名词。"
-                rows={3}
-                className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
-              />
-              <p className="mt-1.5 text-xs text-gray-400">
-                提示词会直接传给本地 Whisper 服务。
-              </p>
-            </div>
-
-            <button
-              onClick={handleTestSubtitleApi}
-              disabled={isTestingSubtitleApi}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isTestingSubtitleApi ? <Loader2 size={16} className="animate-spin" /> : <TestTube2 size={16} />}
-              测试本地 Whisper
-            </button>
-
-            <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-gray-700">Whisper 状态</div>
-                <button
-                  onClick={loadWhisperStatus}
-                  disabled={isLoadingWhisperStatus}
-                  className="text-xs text-gray-600 hover:text-gray-900 flex items-center gap-1 disabled:opacity-50"
-                >
-                  {isLoadingWhisperStatus ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  刷新
-                </button>
-              </div>
-              <div className="text-sm text-gray-600 space-y-1">
-                <div>目标模型: {whisperStatus?.desired_model || settings.subtitleLocalModel}</div>
-                <div>当前模型: {whisperStatus?.current_model || '未知'}</div>
-                <div>容器状态: {whisperStatus?.container_running ? '运行中' : '未运行'}</div>
-                <div>健康状态: {whisperStatus?.container_health || (whisperStatus?.ready ? 'healthy' : 'unknown')}</div>
-                <div>服务状态: {whisperStatus?.downloading ? '下载中 / 加载中' : whisperStatus?.ready ? '就绪' : '未就绪'}</div>
-              </div>
-              <div className="text-xs text-gray-500">
-                {whisperStatus?.message || '加载中...'}
-              </div>
-              <button
-                onClick={handleRestartWhisper}
-                disabled={isRestartingWhisper}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isRestartingWhisper ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                应用模型并重启 Whisper
-              </button>
-            </div>
-            {saveMessage && (
-              <div className={`rounded-xl px-4 py-3 text-sm ${saveMessage.startsWith('保存失败') ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
-                {saveMessage}
-              </div>
-            )}
+            </label>
           </div>
 
+          {/* 下载封面开关 */}
+          <div>
+            <label className="flex items-center justify-between cursor-pointer group">
+              <div>
+                <div className="text-sm font-semibold text-gray-700 mb-1">下载封面图</div>
+                <p className="text-xs text-gray-400">
+                  一键下载时，同时下载每个作品的封面图片
+                </p>
+              </div>
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={settings.enableDownloadCover}
+                  onChange={(e) => setSettings({ ...settings, enableDownloadCover: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </div>
+            </label>
+          </div>
+
+          {/* 文件名自定义设置 */}
+          <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/50">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-gray-700 mb-1">文件名格式</div>
+              <p className="text-xs text-gray-400">
+                点击选择文件名中包含的字段，拖动调整顺序
+              </p>
+            </div>
+
+            {/* 已选字段预览条 */}
+            <FilenameFieldsEditor
+              fields={settings.filenameFields}
+              separator={settings.filenameSeparator}
+              onChange={(fields) => setSettings({ ...settings, filenameFields: fields })}
+            />
+
+            {/* 可选字段 chips */}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {FILENAME_FIELDS.map((field) => {
+                const isSelected = settings.filenameFields.includes(field.key);
+                return (
+                  <button
+                    key={field.key}
+                    onClick={() => {
+                      const newFields = isSelected
+                        ? settings.filenameFields.filter(f => f !== field.key)
+                        : [...settings.filenameFields, field.key];
+                      if (newFields.length === 0) return;
+                      setSettings({ ...settings, filenameFields: newFields });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                    }`}
+                  >
+                    {field.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 分隔符设置 */}
+            <div className="mt-3 flex items-center gap-3">
+              <label className="text-xs text-gray-500 shrink-0">分隔符</label>
+              <input
+                type="text"
+                value={settings.filenameSeparator}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val && !/[<>:"/\\|?*]/.test(val)) {
+                    setSettings({ ...settings, filenameSeparator: val });
+                  }
+                }}
+                className="w-16 px-3 py-1.5 border border-gray-200 rounded-lg bg-white text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                maxLength={3}
+              />
+              <span className="text-xs text-gray-400">字段之间的连接符</span>
+            </div>
+
+            {/* 实时预览 */}
+            <div className="mt-3 p-2.5 bg-white rounded-lg border border-gray-100">
+              <div className="text-xs text-gray-400 mb-1">预览</div>
+              <div className="text-sm text-gray-700 font-mono truncate" title={generateFilenamePreview(settings.filenameFields, settings.filenameSeparator)}>
+                {generateFilenamePreview(settings.filenameFields, settings.filenameSeparator)}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50/50 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
+        <div className="px-5 py-3 bg-gray-50/50 border-t border-gray-100 flex justify-end gap-3">
           <button
             onClick={onClose}
             className="px-5 py-2.5 rounded-xl text-gray-600 font-medium hover:bg-gray-200 transition-colors text-sm"

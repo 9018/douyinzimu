@@ -18,7 +18,6 @@ interface DownloadInfo {
   gid: string;
   filename: string;
   url: string;
-  dir: string;
 }
 
 
@@ -52,46 +51,7 @@ export const useAria2Download = () => {
   const onCompleteCallbackRef = useRef<(() => void) | null>(null);
   const statsRef = useRef<{ completed: number; failed: number }>({ completed: 0, failed: 0 });
   const prevConnectedRef = useRef(false);
-  const uploadedRef = useRef<Set<string>>(new Set());
-
-  const toRelativePath = useCallback((basePath: string, dir: string, filename: string) => {
-    const normalizedBase = basePath.replace(/\\/g, '/').replace(/\/+$/, '');
-    const normalizedDir = dir.replace(/\\/g, '/').replace(/\/+$/, '');
-    const normalizedFile = filename.replace(/\\/g, '/');
-    const fullPath = `${normalizedDir}/${normalizedFile}`;
-    if (normalizedBase && fullPath.startsWith(`${normalizedBase}/`)) {
-      return fullPath.slice(normalizedBase.length + 1);
-    }
-    return normalizedFile;
-  }, []);
-
-  const uploadIfNeeded = useCallback(async (dir: string, filename: string) => {
-    try {
-      const settings = await bridge.getSettings();
-      if (!settings.webdavEnabled || !settings.webdavUploadDownloads) {
-        return;
-      }
-
-      const relativePath = toRelativePath(settings.downloadPath, dir, filename);
-      if (uploadedRef.current.has(relativePath)) {
-        return;
-      }
-
-      const result = await bridge.uploadToWebDAV(relativePath, 'download');
-      if (result.success) {
-        uploadedRef.current.add(relativePath);
-        logger.success(`下载文件已上传到 WebDAV: ${relativePath}`, undefined, 'webdav');
-      } else {
-        logger.error(`下载文件上传 WebDAV 失败: ${result.error || relativePath}`, undefined, 'webdav');
-      }
-    } catch (error) {
-      logger.error(
-        `下载文件上传 WebDAV 异常: ${error instanceof Error ? error.message : String(error)}`,
-        undefined,
-        'webdav'
-      );
-    }
-  }, [toRelativePath]);
+  const batchAbortRef = useRef<AbortController | null>(null);
 
   /**
    * 初始化Aria2连接
@@ -99,11 +59,11 @@ export const useAria2Download = () => {
    */
   useEffect(() => {
     const unsubscribe = aria2Service.onConnectionChange((isConnected) => {
-      console.log(`[useAria2Download] 连接状态变化: ${isConnected}, 之前: ${prevConnectedRef.current}`);
+      logger.debug(`[useAria2Download] 连接状态变化: ${isConnected}, 之前: ${prevConnectedRef.current}`);
 
       // 只在状态从 false 变为 true 时显示提示
       if (isConnected && !prevConnectedRef.current) {
-        console.log('[useAria2Download] 显示连接成功提示');
+        logger.debug('[useAria2Download] 显示连接成功提示');
         toast.success('Aria2 下载服务已连接');
         logger.success('Aria2 下载服务已连接');
       }
@@ -112,16 +72,13 @@ export const useAria2Download = () => {
     });
 
     const initAria2 = async () => {
-      const ready = await bridge.waitForReady(30000);
-      if (!ready) return;
-
       try {
         const config = await bridge.getAria2Config();
         // 启动连接（后台异步进行）
         await aria2Service.connect(config.host, config.port, config.secret, true);
         logger.info('Aria2下载服务初始化完成');
       } catch (error) {
-        console.error('[useAria2Download] 初始化失败:', error);
+        logger.debug('[useAria2Download] 初始化失败:', error);
         logger.error('Aria2下载服务初始化失败', error instanceof Error ? error : undefined);
       }
     };
@@ -130,16 +87,18 @@ export const useAria2Download = () => {
 
     // 清理函数：确保组件卸载时清理所有资源
     return () => {
-      // 取消订阅连接状态变化
       unsubscribe();
 
-      // 清理轮询定时器
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
 
-      // 清理回调引用
+      if (batchAbortRef.current) {
+        batchAbortRef.current.abort();
+        batchAbortRef.current = null;
+      }
+
       onCompleteCallbackRef.current = null;
     };
   }, []);
@@ -219,7 +178,6 @@ export const useAria2Download = () => {
               downloads.delete(workId);
               statsRef.current.completed++;
               newProgress[workId] = 100;
-              await uploadIfNeeded(info.dir, info.filename);
             } else if (task.status === 'error') {
               const errorMsg = task.errorMessage || task.errorCode || '未知错误';
               logger.error(`下载失败: ${info.filename} - ${errorMsg}`);
@@ -233,16 +191,25 @@ export const useAria2Download = () => {
           } else {
             // 任务不在任何列表中，可能已被清理
             // 从跟踪列表中移除，避免无限轮询
-            console.log(`[useAria2Download] 任务 ${workId} 不在 aria2 列表中，移除跟踪`);
+            logger.debug(`[useAria2Download] 任务 ${workId} 不在 aria2 列表中，移除跟踪`);
             downloads.delete(workId);
           }
         }
       } catch (error) {
-        console.error('[useAria2Download] 批量查询失败:', error);
+        logger.error('[useAria2Download] 批量查询失败:', error instanceof Error ? error : undefined);
       }
 
       // 更新进度
-      setProgress(prev => ({ ...prev, ...newProgress }));
+      setProgress(prev => {
+        const updated = { ...prev, ...newProgress };
+        const cleaned: Record<string, number> = {};
+        for (const [id, val] of Object.entries(updated)) {
+          if (val >= 0 && val < 100) {
+            cleaned[id] = val;
+          }
+        }
+        return cleaned;
+      });
 
       // 计算活跃任务数和总进度
       let activeCount = 0;
@@ -261,8 +228,8 @@ export const useAria2Download = () => {
         downloadSpeed: currentSpeed,
         totalProgress: activeCount > 0 ? Math.round(totalProgress / activeCount) : 0,
       });
-    }, 1000);
-  }, [uploadIfNeeded]);
+    }, 2000);
+  }, []);
 
   /**
    * 停止轮询
@@ -286,6 +253,11 @@ export const useAria2Download = () => {
    * 需求 6.3: 确保及时清理内存中的任务信息
    */
   const cancelAll = useCallback(async () => {
+    if (batchAbortRef.current) {
+      batchAbortRef.current.abort();
+      batchAbortRef.current = null;
+    }
+
     const downloads = downloadsRef.current;
     if (downloads.size === 0) return;
 
@@ -354,7 +326,7 @@ export const useAria2Download = () => {
       }
 
       // 确保任务添加后正确加入跟踪映射表
-      downloadsRef.current.set(workId, { workId, gid, filename, url, dir: downloadPath });
+      downloadsRef.current.set(workId, { workId, gid, filename, url });
 
       // 初始化进度为0
       setProgress(prev => ({ ...prev, [workId]: 0 }));
@@ -437,7 +409,7 @@ export const useAria2Download = () => {
 
       return true;
     } catch (error) {
-      console.error('[useAria2Download] 取消任务失败:', error);
+      logger.error('[useAria2Download] 取消任务失败:', error instanceof Error ? error : undefined);
       // 即使取消失败也从映射表中移除，避免内存泄漏
       downloadsRef.current.delete(workId);
       return false;
@@ -506,10 +478,15 @@ export const useAria2Download = () => {
       logger.info(`开始批量下载 ${tasks.length} 个任务`);
       toast.info(`开始批量下载 ${tasks.length} 个任务`);
 
+      const abortController = new AbortController();
+      batchAbortRef.current = abortController;
+
       let cookie = '';
+      let downloadInterval = 0;
       try {
         const settings = await bridge.getSettings();
         cookie = settings.cookie || '';
+        downloadInterval = settings.downloadInterval || 0;
       } catch (error) {
         logger.warn('获取Cookie失败，将不使用Cookie进行下载');
       }
@@ -521,6 +498,11 @@ export const useAria2Download = () => {
 
       // 处理部分任务失败的情况：逐个调用addDownload提交任务
       for (let i = 0; i < tasks.length; i++) {
+        if (abortController.signal.aborted) {
+          logger.info('批量下载已取消，停止添加新任务');
+          break;
+        }
+
         const task = tasks[i];
         const workId = `batch_${i + 1}_${Date.now()}`;
 
@@ -538,7 +520,19 @@ export const useAria2Download = () => {
           const errorMsg = error instanceof Error ? error.message : String(error);
           logger.error(`任务添加异常: ${task.out} - ${errorMsg}`);
         }
+
+        if (downloadInterval > 0 && i < tasks.length - 1 && !abortController.signal.aborted) {
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, downloadInterval * 1000);
+            abortController.signal.addEventListener('abort', () => {
+              clearTimeout(timer);
+              resolve();
+            }, { once: true });
+          });
+        }
       }
+
+      batchAbortRef.current = null;
 
       // 显示结果提示
       if (successCount > 0) {

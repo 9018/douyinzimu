@@ -5,10 +5,12 @@ Cookie工具模块
 提供Cookie的格式转换和验证功能。
 """
 
-from typing import Dict
+from typing import Any
 
-import requests
+import niquests as requests
 from loguru import logger
+
+from .exceptions import VerifyCheckError
 
 
 class CookieManager:
@@ -69,7 +71,7 @@ class CookieManager:
         return True
 
     @staticmethod
-    def cookies_str_to_dict(cookie_string: str) -> Dict[str, str]:
+    def cookies_str_to_dict(cookie_string: str) -> dict[str, str]:
         """
         将Cookie字符串转换为字典格式
 
@@ -110,7 +112,7 @@ class CookieManager:
         return cookie_dict
 
     @staticmethod
-    def cookies_dict_to_str(cookie_dict: Dict[str, str]) -> str:
+    def cookies_dict_to_str(cookie_dict: dict[str, str]) -> str:
         """
         将Cookie字典转换为字符串格式
 
@@ -179,6 +181,32 @@ class CookieManager:
         except Exception as e:
             logger.error(f"Cookie验证失败，未知错误: {e}")
             return False
+
+    @staticmethod
+    def check_verify_check(obj: Any) -> bool:
+        """
+        递归检查对象中是否包含 'verify_check' 字符串
+        
+        Args:
+            obj: 要检查的对象（字典、列表或其他）
+        
+        Returns:
+            bool: 如果发现 'verify_check' 返回 True，否则返回 False
+        """
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key == "verify_check" or value == "verify_check":
+                    return True
+                if CookieManager.check_verify_check(value):
+                    return True
+        elif isinstance(obj, list):
+            for item in obj:
+                if CookieManager.check_verify_check(item):
+                    return True
+        elif isinstance(obj, str):
+            if obj == "verify_check":
+                return True
+        return False
 
     # 浏览器 Cookie 获取功能已移除
     # 原因：不同浏览器适配复杂，建议手动从浏览器复制 Cookie

@@ -15,6 +15,7 @@ import React, { useEffect, useState } from 'react';
 import { bridge } from '../services/bridge';
 import { logger } from '../services/logger';
 import { DouyinWork } from '../types';
+import { generateFilename } from '../utils/formatters';
 import { withErrorHandling } from '../utils/errorHandler';
 import { toast } from './Toast';
 
@@ -36,15 +37,6 @@ interface DetailModalProps {
   startPolling: () => void;
   progress: Record<string, number>;
 }
-
-const buildDatedPath = (basePath: string, prefix?: string) => {
-  const now = new Date();
-  const year = String(now.getFullYear());
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const parts = [basePath.replace(/[\\/]+$/, ''), prefix, year, month, day].filter(Boolean);
-  return parts.join('/');
-};
 
 export const DetailModal: React.FC<DetailModalProps> = ({
   work, onClose, onPrev, onNext, hasPrev, hasNext,
@@ -196,9 +188,11 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
     try {
       const settings = await bridge.getSettings();
-      const downloadPath = buildDatedPath(settings.downloadPath || '');
+      const downloadPath = settings.downloadPath || '';
       const cookie = settings.cookie || '';
-      const baseFilename = `${work.id}_${work.desc || '无标题'}`;
+      const filenameFields = settings.filenameFields || ['id', 'title'];
+      const filenameSeparator = settings.filenameSeparator || '_';
+      const baseFilename = generateFilename(work, filenameFields, filenameSeparator);
 
       let successCount = 0;
 
@@ -277,7 +271,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   const downloadCover = async () => {
     try {
       const settings = await bridge.getSettings();
-      const downloadPath = buildDatedPath(settings.downloadPath || '');
+      const downloadPath = settings.downloadPath || '';
       const cookie = settings.cookie || '';
       const filename = `${work.id}_cover.jpg`;
       const result = await addDownload(`${work.id}_cover`, work.cover, filename, downloadPath, cookie);
@@ -299,7 +293,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
     if (work.music?.url) {
       try {
         const settings = await bridge.getSettings();
-        const downloadPath = buildDatedPath(settings.downloadPath || '');
+        const downloadPath = settings.downloadPath || '';
         const cookie = settings.cookie || '';
         const filename = `${work.id}_music.mp3`;
         const result = await addDownload(`${work.id}_music`, work.music.url, filename, downloadPath, cookie);
@@ -341,17 +335,17 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-3 py-3 backdrop-blur-sm animate-in fade-in duration-200 sm:px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
       <div
-        className="relative flex h-full max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-gray-200/50 bg-white shadow-2xl animate-in zoom-in-95 duration-200 lg:h-[85vh] lg:flex-row"
+        className="bg-white rounded-2xl shadow-2xl flex overflow-hidden w-[720px] h-[85vh] relative animate-in zoom-in-95 duration-200 border border-gray-200/50"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left Side: Media */}
-        <div className="flex-1 bg-black relative flex items-center justify-center group overflow-hidden min-h-[260px] lg:min-h-0">
+        <div className="flex-1 bg-black relative flex items-center justify-center group overflow-hidden">
           {hasPrev && (
             <button
               onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
-              className="absolute left-3 top-1/2 z-30 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white backdrop-blur-md transition-all hover:scale-110 hover:bg-white/20 lg:left-4 lg:opacity-0 lg:group-hover:opacity-100"
+              className="absolute left-4 top-1/2 -translate-y-1/2 z-30 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-all opacity-0 group-hover:opacity-100 hover:scale-110"
             >
               <ChevronLeft size={24} />
             </button>
@@ -359,7 +353,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           {hasNext && (
             <button
               onClick={(e) => { e.stopPropagation(); onNext?.(); }}
-              className="absolute right-3 top-1/2 z-30 -translate-y-1/2 rounded-full bg-white/15 p-2 text-white backdrop-blur-md transition-all hover:scale-110 hover:bg-white/20 lg:right-4 lg:opacity-0 lg:group-hover:opacity-100"
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-30 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-md transition-all opacity-0 group-hover:opacity-100 hover:scale-110"
             >
               <ChevronRight size={24} />
             </button>
@@ -472,7 +466,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
 
         {/* Right Side: Info */}
-        <div className="w-full shrink-0 border-t border-gray-100 bg-white flex flex-col lg:w-[300px] lg:border-l lg:border-t-0">
+        <div className="w-[300px] bg-white flex flex-col border-l border-gray-100 shrink-0">
           <div className="px-5 py-4 flex items-center justify-between border-b border-gray-100 bg-gray-50/30">
             <span className="font-bold text-gray-800">作品详情</span>
             <div className="flex items-center gap-1">
@@ -522,7 +516,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             </div>
           </div>
 
-          <div className="px-5 py-3 border-t border-gray-50 grid grid-cols-3 gap-2 sm:grid-cols-3">
+          <div className="px-5 py-3 border-t border-gray-50 grid grid-cols-3 gap-2">
             <div className="flex flex-col items-center gap-1 text-gray-600 p-2 rounded-lg bg-gray-50">
               <Heart size={16} className={work.stats.digg_count > 0 ? "fill-red-500 text-red-500" : ""} />
               <span className="text-xs font-medium">{work.stats.digg_count}</span>
@@ -538,7 +532,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           </div>
 
           <div className="p-5 border-t border-gray-100 bg-gray-50/50 space-y-3">
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex gap-2">
               <button
                 onClick={downloadCover}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 hover:border-gray-300 transition-all active:scale-95 shadow-sm"

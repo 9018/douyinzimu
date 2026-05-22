@@ -6,11 +6,20 @@
 
 import os
 
+from loguru import logger
+
 # 兼容独立脚本运行和模块导入两种方式
 try:
     from .utils.paths import get_app_root, get_resource_root
 except ImportError:
     from utils.paths import get_app_root, get_resource_root
+
+try:
+    from importlib.metadata import version as get_version
+    APP_VERSION = get_version("douyin-crawler")
+except Exception as e:
+    logger.debug(f"获取版本号失败: {e}")
+    APP_VERSION = "0.0.0"
 
 # 项目根目录（应用目录）
 PROJECT_ROOT = get_app_root()
@@ -21,7 +30,6 @@ RESOURCE_ROOT = get_resource_root()
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 DOWNLOAD_DIR = os.path.join(PROJECT_ROOT, "download")
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
-WHISPER_ENV_FILE = os.path.join(CONFIG_DIR, "whisper.env")
 ARIA2_CONF_FILE = os.path.join(CONFIG_DIR, "aria2.conf")
 WEBVIEW_STORAGE_DIR = os.path.join(CONFIG_DIR, "webview_storage")
 
@@ -36,6 +44,7 @@ ARIA2_DEFAULTS = {
 DOWNLOAD_DEFAULTS = {
     "MAX_RETRIES": 3,
     "MAX_CONCURRENCY": 5,
+    "DOWNLOAD_INTERVAL": 0,
 }
 
 # 默认设置（用于首次运行创建配置文件）
@@ -51,21 +60,11 @@ DEFAULT_SETTINGS = {
     "aria2Host": ARIA2_DEFAULTS["HOST"],
     "aria2Port": ARIA2_DEFAULTS["PORT"],
     "aria2Secret": ARIA2_DEFAULTS["SECRET"],
-    "webdavEnabled": False,
-    "webdavUrl": "",
-    "webdavUsername": "",
-    "webdavPassword": "",
-    "webdavBasePath": "OS/docker",
-    "webdavUploadDownloads": False,
-    "webdavUploadTransformed": False,
-    "subtitleLanguage": "",
-    "subtitleMode": "zh",
-    "subtitlePrompt": "",
-    "subtitleLocalWhisperUrl": "http://host.docker.internal:9001",
-    "subtitleLocalModel": "medium",
-    "subtitleWordTimestamps": True,
-    "subtitleAutoGenerateOnUpload": False,
-    "subtitleAutoBurnAfterGenerate": False,
+    "enableDownloadTitle": False,
+    "enableDownloadCover": False,
+    "downloadInterval": DOWNLOAD_DEFAULTS["DOWNLOAD_INTERVAL"],
+    "filenameFields": ["id", "title"],
+    "filenameSeparator": "_",
 }
 
 # 窗口最小尺寸

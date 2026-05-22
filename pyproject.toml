@@ -1,6 +1,6 @@
 [project]
 name = "douyin-crawler"
-version = "5.1.260211"
+version = "5.3.260515"
 description = "抖音视频下载工具"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,7 +13,8 @@ dependencies = [
     "pyperclip>=1.11.0",
     "pywebview>=6.1 ; sys_platform != 'linux'",
     "pywebview[gtk]>=6.1 ; sys_platform == 'linux'",
-    "requests>=2.32.5",
+    "niquests>=3.10",
+    "pydantic>=2.0",
     "ujson>=5.11.0",
     "uvicorn>=0.40.0",
 ]

@@ -43,7 +43,7 @@ type Listener = (logs: LogEntry[]) => void;
 class LoggerService {
   private logs: LogEntry[] = [];                    // 日志列表
   private listeners: Set<Listener> = new Set();     // 监听器集合
-  private maxLogs = 5000;                           // 最大日志数量
+  private maxLogs = 1000;                           // 最大日志数量
   private unsubscribeFromBackend?: () => void;      // 取消后端订阅的函数
   private _isInitialized = false;                   // 是否已初始化
   private _isNotifying = false;                     // 是否正在通知监听器
@@ -133,7 +133,7 @@ class LoggerService {
     const now = new Date();
     const timeString = now.toTimeString().split(' ')[0] + '.' + now.getMilliseconds().toString().padStart(3, '0');
     return {
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).substring(2, 11),
       timestamp: timeString,
       level,
       message,

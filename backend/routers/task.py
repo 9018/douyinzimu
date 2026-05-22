@@ -8,7 +8,7 @@ import os
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
@@ -16,9 +16,11 @@ from pydantic import BaseModel
 
 from ..constants import DOWNLOAD_DIR
 from ..lib.cookies import CookieManager
+from ..lib.exceptions import CookieExpiredError, VerifyCheckError
 from ..settings import settings
 from ..sse import SSEEventType, sse
 from ..state import state
+from ..utils.text import load_json
 
 router = APIRouter(prefix="/api/task", tags=["任务管理"])
 
@@ -33,8 +35,8 @@ class StartTaskRequest(BaseModel):
 
     type: str
     target: str
-    limit: int = 10
-    filters: Optional[Dict[str, str]] = None
+    limit: int = 0
+    filters: dict[str, str] | None = None
 
 
 class TaskResponse(BaseModel):
@@ -53,9 +55,15 @@ class TaskStatus(BaseModel):
     status: str
     progress: int
     result_count: int
-    error: Optional[str]
+    error: str | None
     created_at: float
     updated_at: float
+
+
+class CancelTaskRequest(BaseModel):
+    """取消采集任务的请求模型"""
+
+    task_id: str
 
 
 # ============================================================================
@@ -64,7 +72,7 @@ class TaskStatus(BaseModel):
 
 
 @router.post("/start", response_model=TaskResponse)
-def start_task(request: StartTaskRequest) -> Dict[str, Any]:
+def start_task(request: StartTaskRequest) -> dict[str, Any]:
     """
     启动采集任务
 
@@ -87,8 +95,7 @@ def start_task(request: StartTaskRequest) -> Dict[str, Any]:
     # 生成唯一的任务ID
     task_id = f"task_{uuid.uuid4().hex[:8]}"
 
-    # 初始化任务状态
-    state.task_status[task_id] = {
+    state.init_task(task_id, {
         "id": task_id,
         "type": request.type,
         "target": request.target,
@@ -100,10 +107,10 @@ def start_task(request: StartTaskRequest) -> Dict[str, Any]:
         "error": None,
         "created_at": time.time(),
         "updated_at": time.time(),
-    }
+    })
 
-    # 初始化结果缓存
-    state.task_results[task_id] = []
+    # 注册取消信号事件
+    cancel_event = state.register_cancel_event(task_id)
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info(f"📥 开始采集任务")
@@ -123,6 +130,7 @@ def start_task(request: StartTaskRequest) -> Dict[str, Any]:
             target=request.target,
             limit=request.limit,
             filters=request.filters,
+            cancel_event=cancel_event,
         )
 
     task_thread = threading.Thread(target=run_task, daemon=True)
@@ -131,8 +139,41 @@ def start_task(request: StartTaskRequest) -> Dict[str, Any]:
     return {"task_id": task_id, "status": "running"}
 
 
+@router.post("/cancel", response_model=TaskResponse)
+def cancel_task(request: CancelTaskRequest) -> dict[str, Any]:
+    """
+    取消采集任务
+
+    - task_id: 要取消的任务ID
+    """
+    task_id = request.task_id
+
+    if not state.task_exists(task_id):
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+
+    task_info = state.get_task_status(task_id)[0]
+
+    if task_info["status"] == "cancelling":
+        return {"task_id": task_id, "status": "cancelling"}
+
+    if task_info["status"] in ("completed", "cancelled", "error", "failed"):
+        return {"task_id": task_id, "status": task_info["status"]}
+
+    if task_info["status"] not in ("running",):
+        raise HTTPException(status_code=400, detail=f"任务当前状态为 {task_info['status']}，无法取消")
+
+    if not state.request_cancel(task_id):
+        raise HTTPException(status_code=500, detail="取消信号发送失败")
+
+    state.set_task_status(task_id, status="cancelling", updated_at=time.time())
+
+    logger.info(f"⏹ 发送取消信号: 任务 {task_id}")
+
+    return {"task_id": task_id, "status": "cancelling"}
+
+
 @router.get("/status")
-def get_task_status(task_id: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_task_status(task_id: str | None = None) -> list[dict[str, Any]]:
     """
     获取任务状态
 
@@ -140,26 +181,47 @@ def get_task_status(task_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
 
     if task_id:
-        if task_id in state.task_status:
-            return [state.task_status[task_id]]
-        else:
-            return []
+        return state.get_task_status(task_id)
     else:
-        return list(state.task_status.values())
+        return state.get_task_status()
 
 
 @router.get("/results/{task_id}")
-def get_task_results(task_id: str) -> List[Dict[str, Any]]:
+def get_task_results(task_id: str) -> list[dict[str, Any]]:
     """
     获取任务的采集结果
 
     - task_id: 任务ID
     """
 
-    if task_id not in state.task_results:
+    if not state.task_exists(task_id):
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
 
-    return state.task_results[task_id]
+    return state.get_task_results(task_id)
+
+
+@router.get("/history")
+def get_task_history(rel_path: str) -> list[dict[str, Any]]:
+    """
+    获取增量采集的历史数据
+
+    - rel_path: 相对于下载目录的子路径（不含.json后缀）
+    """
+
+    download_dir = os.path.abspath(settings.get("downloadPath", DOWNLOAD_DIR))
+    abs_path = os.path.abspath(os.path.join(download_dir, rel_path))
+
+    if not abs_path.startswith(download_dir + os.sep) and abs_path != download_dir:
+        raise HTTPException(status_code=400, detail="路径不安全")
+
+    if ".." in rel_path:
+        raise HTTPException(status_code=400, detail="路径不安全")
+
+    data = load_json(abs_path)
+    if data is None:
+        return []
+
+    return _convert_douyin_results(data, "post")
 
 
 # ============================================================================
@@ -172,62 +234,62 @@ def _execute_task(
     task_type: str,
     target: str,
     limit: int,
-    filters: Optional[Dict[str, str]],
+    filters: dict[str, str] | None,
+    cancel_event: threading.Event = None,
 ) -> None:
     """执行采集任务（在后台线程中运行）"""
 
     try:
-        # 导入爬虫模块
         from ..lib.douyin import Douyin
 
-        # 获取 cookie
         cookie = settings.get("cookie", "").strip()
 
-        # 验证 cookie
         if not CookieManager.validate_cookie(cookie):
             logger.error("✗ Cookie验证失败")
             raise Exception("Cookie无效或已过期，请在设置中更新Cookie")
 
         logger.info("✓ Cookie验证通过，开始采集...")
 
-        # 定义回调函数，处理新数据
+        seen_ids: set[str] = set()
+
         def handle_new_items(new_items, item_type):
             if not new_items:
                 return
 
-            logger.debug(f"收到 {len(new_items)} 条新结果，开始转换...")
+            unique_items = []
+            for item in new_items:
+                item_id = str(item.get("id", ""))
+                if item_id and item_id not in seen_ids:
+                    seen_ids.add(item_id)
+                    unique_items.append(item)
 
-            # 转换格式
-            works = _convert_douyin_results(new_items, item_type)
-
-            if not works:
-                logger.warning(f"转换后没有有效数据！原始数据: {len(new_items)} 条")
+            if not unique_items:
+                logger.warning(f"所有数据已存在，跳过 {len(new_items)} 条重复数据")
                 return
 
-            # 更新缓存
-            state.task_results[task_id].extend(new_items)
+            logger.debug(f"收到 {len(unique_items)} 条新结果，开始转换...")
 
-            # 更新任务状态
-            state.task_status[task_id]["result_count"] = len(
-                state.task_results[task_id]
-            )
-            state.task_status[task_id]["updated_at"] = time.time()
+            works = _convert_douyin_results(unique_items, item_type)
 
-            # 通过 SSE 推送结果
+            if not works:
+                logger.warning(f"转换后没有有效数据！原始数据: {len(unique_items)} 条")
+                return
+
+            count = state.add_results(task_id, works)
+
             logger.info(
-                f"推送 SSE: {len(works)} 条新结果，累计 {len(state.task_results[task_id])} 条"
+                f"推送 SSE: {len(works)} 条新结果，累计 {count} 条"
             )
             sse.broadcast_sync(
                 SSEEventType.TASK_RESULT,
                 {
                     "task_id": task_id,
                     "data": works,
-                    "total": len(state.task_results[task_id]),
+                    "total": count,
                 },
             )
 
-        # 创建爬虫实例
-        douyin = Douyin(
+        with Douyin(
             target=target,
             limit=int(limit) if limit > 0 else 0,
             type=task_type,
@@ -236,78 +298,111 @@ def _execute_task(
             user_agent=settings.get("userAgent", ""),
             filters=filters or {},
             on_new_items=handle_new_items,
-        )
+            enable_download_title=settings.get("enableDownloadTitle", False),
+            enable_download_cover=settings.get("enableDownloadCover", False),
+            cancel_event=cancel_event,
+            filename_fields=settings.get("filenameFields", ["id", "title"]),
+            filename_separator=settings.get("filenameSeparator", "_"),
+        ) as douyin:
 
-        # 执行采集
-        logger.info("🚀 正在采集数据...")
-        douyin.run()
+            logger.info("🚀 正在采集数据...")
+            douyin.run()
 
-        # 获取后端实际识别的类型
-        detected_type = douyin.type
+            detected_type = douyin.type
 
-        # 保存 aria2_conf 路径
-        state.aria2_config_paths[task_id] = douyin.aria2_conf
-        state.task_status[task_id]["aria2_conf"] = douyin.aria2_conf
+            state.set_aria2_config(task_id, douyin.aria2_conf)
 
-        # 检查是否有未回调的结果
-        has_new_results = (
-            douyin.results
-            and len(douyin.results) > len(state.task_results[task_id])
-            and douyin.results != douyin.results_old
-        )
+            is_cancelled = cancel_event is not None and cancel_event.is_set()
 
-        if has_new_results:
-            new_results = douyin.results[len(state.task_results[task_id]) :]
-            works = _convert_douyin_results(new_results, douyin.type)
-            state.task_results[task_id].extend(new_results)
+            if is_cancelled:
+                state.set_task_status(task_id, status="cancelled", updated_at=time.time())
 
-            if works:
+                result_count = len(state.get_task_results(task_id))
+                logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                logger.info(
+                    f"⏹ 任务已取消: 已采集 {result_count} 条数据"
+                )
+                logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
                 sse.broadcast_sync(
-                    SSEEventType.TASK_RESULT,
+                    SSEEventType.TASK_STATUS,
                     {
                         "task_id": task_id,
-                        "data": works,
-                        "total": len(state.task_results[task_id]),
+                        "status": "cancelled",
+                        "detected_type": detected_type,
+                        "total": result_count,
+                    },
+                )
+            else:
+                result_count = len(state.get_task_results(task_id))
+                state.set_task_status(task_id, status="completed", progress=100, updated_at=time.time())
+
+                logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                logger.success(
+                    f"✓ 任务完成: 成功采集 {result_count} 条数据"
+                )
+                logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+                is_incremental = (
+                    detected_type == "post"
+                    and len(douyin.results_old) > 0
+                    and douyin._has_received_data
+                )
+                rel_down_path = None
+                if is_incremental:
+                    download_dir = os.path.abspath(settings.get("downloadPath", DOWNLOAD_DIR))
+                    abs_down_path = os.path.abspath(douyin.down_path)
+                    if abs_down_path.startswith(download_dir):
+                        rel_down_path = os.path.relpath(abs_down_path, download_dir)
+                sse.broadcast_sync(
+                    SSEEventType.TASK_STATUS,
+                    {
+                        "task_id": task_id,
+                        "status": "completed",
+                        "detected_type": detected_type,
+                        "total": result_count,
+                        "is_incremental": is_incremental,
+                        "rel_down_path": rel_down_path,
                     },
                 )
 
-        # 更新任务状态为完成
-        state.task_status[task_id]["status"] = "completed"
-        state.task_status[task_id]["progress"] = 100
-        state.task_status[task_id]["updated_at"] = time.time()
+    except CookieExpiredError as e:
+        state.set_task_status(task_id, status="error", error="Cookie已失效，请在设置中更新Cookie", updated_at=time.time())
 
         logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        logger.success(
-            f"✓ 任务完成: 成功采集 {len(state.task_results[task_id])} 条数据"
-        )
+        logger.error(f"✗ Cookie已失效: {e}")
+        logger.error(f"  请在设置中更新Cookie后再继续")
         logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        # 推送任务完成状态
-        is_incremental = (
-            detected_type == "post" and len(state.task_results[task_id]) == 0
-        )
         sse.broadcast_sync(
-            SSEEventType.TASK_STATUS,
+            SSEEventType.TASK_ERROR,
             {
                 "task_id": task_id,
-                "status": "completed",
-                "detected_type": detected_type,
-                "total": len(state.task_results[task_id]),
-                "is_incremental": is_incremental,
+                "error": "Cookie已失效，请在设置中更新Cookie",
             },
         )
+    except VerifyCheckError as e:
+        state.set_task_status(task_id, status="error", error="触发验证码，请完成验证后再继续", updated_at=time.time())
 
+        logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        logger.error(f"✗ 检测到验证码: {e}")
+        logger.error(f"  请在浏览器中打开抖音完成验证后再继续")
+        logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        sse.broadcast_sync(
+            SSEEventType.TASK_ERROR,
+            {
+                "task_id": task_id,
+                "error": "触发验证码，请完成验证后再继续",
+            },
+        )
     except Exception as e:
-        # 更新任务状态为失败
-        state.task_status[task_id]["status"] = "error"
-        state.task_status[task_id]["error"] = str(e)
-        state.task_status[task_id]["updated_at"] = time.time()
+        state.set_task_status(task_id, status="error", error=str(e), updated_at=time.time())
 
         logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         logger.error(f"✗ 任务失败: {str(e)}")
         logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        # 推送任务错误
         sse.broadcast_sync(
             SSEEventType.TASK_ERROR,
             {
@@ -315,11 +410,13 @@ def _execute_task(
                 "error": str(e),
             },
         )
+    finally:
+        state.cleanup_cancel_event(task_id)
 
 
 def _convert_douyin_results(
-    results: List[Dict[str, Any]], task_type: str
-) -> List[Dict[str, Any]]:
+    results: list[dict[str, Any]], task_type: str
+) -> list[dict[str, Any]]:
     """将爬虫结果转换为前端期望的格式"""
     works = []
 
@@ -348,6 +445,7 @@ def _convert_douyin_results(
                 "create_time": time.strftime(
                     "%Y-%m-%d", time.localtime(item.get("time", time.time()))
                 ),
+                "create_timestamp": item.get("time", 0),
             }
 
             # 添加视频时长

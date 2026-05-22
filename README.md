@@ -39,6 +39,9 @@
 ### 🎯 应用特性
 - 🔄 **增量采集**：智能增量采集用户主页作品
 - ⬇️ **批量下载**：集成 Aria2，支持视频/图片批量下载
+- 📄 **标题下载**：可选同时下载作品标题文本文件
+- 🖼️ **封面下载**：可选同时下载作品封面图片
+- ⏱️ **下载间隔**：可配置下载任务间隔时间，避免触发限制
 - 🎨 **多种模式**：GUI 桌面应用 / Web 服务 / cli命令行
 - 🌐 **RESTful API**：v2.0 提供完整的 HTTP API
 - 🔧 **跨平台支持**：Windows / macOS / Linux
@@ -60,67 +63,16 @@
 ### Web 服务（Docker / 全平台）
 
 ```bash
-# 1) 根目录一套编排启动全部服务（默认 compose.yaml）
-docker compose up -d --build
+# Docker（推荐）
+docker compose up -d
 
-# 2) 查看日志
-docker compose logs -f douyin
-docker compose logs -f whisper
-```
-
-运行配置统一放在 `config/`：
-- 应用配置：`config/settings.json`
-- Whisper 容器联动配置：`config/whisper.env`
-
-浏览器访问：
-- 主项目：`http://localhost:8001`
-- Whisper UI：`http://localhost:9001`
-
-
-> 容器启动时会先自动执行：
-> `aria2c --enable-rpc --rpc-listen-all --rpc-allow-origin-all --dir=/app/download -D`
-> 然后再启动后端服务。
-
-#### Docker 编排说明
-
-- `compose.yaml`：默认入口，直接启动整个项目
-- `compose.prod.yaml`：显式生产模式入口
-- `compose.dev.yaml`：开发模式入口
-
-```bash
-# 开发模式（源码热修改）
-docker compose -f compose.dev.yaml up -d --build
-
-# 生产模式（显式指定）
-docker compose -f compose.prod.yaml up -d --build
-```
-
-#### 目录映射说明
-
-**开发模式（compose.dev.yaml）**
-- `./backend -> /app/backend`
-- `./frontend -> /app/frontend`
-- `./config -> /app/config`
-- `./download -> /app/download`
-- `./whisper-asr/app -> whisper UI 自定义后端与页面`
-- `./whisper-asr/transcripts -> /data/transcripts`
-- `./whisper-asr/wavs -> /data/wavs`
-
-> 开发模式首次启动如果检测到 `frontend/dist` 不存在，会在容器中自动执行 `pnpm build`。
-
-**生产模式（compose.yaml / compose.prod.yaml）**
-- `./config -> /app/config`
-- `./download -> /app/download`
-- `./whisper-asr/transcripts -> /data/transcripts`
-- `./whisper-asr/wavs -> /data/wavs`
-- `./whisper-asr/app -> whisper UI 自定义后端与页面`
-
-# 或手动启动（非 Docker）
-```bash
-uv sync
+# 或手动启动
+uv sync 
 cd frontend && pnpm install && pnpm build && cd ..
 python -m backend.server
 ```
+
+浏览器访问 `http://localhost:8000`
 
 ### 命令行（cli模式）
 
